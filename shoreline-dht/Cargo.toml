@@ -1,0 +1,17 @@
+[package]
+name = "shoreline-dht"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bencode-minimal = { version = "0.1" }
+log = { version = "0.4" }
+rand = { version = "0.9" }
+tokio = { version = "1.48", features = ["full"] }
+socket2 = { version = "0.6" }
+serde = { version = "1.0" }
+pnet_datalink = { version = "0.35" }
+ipnetwork = { version = "0.20" }
+
+[profile.release]
+lto = true

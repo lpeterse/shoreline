@@ -1,0 +1,29 @@
+[package]
+name = "shoreline"
+version = "0.1.0"
+description = "A friend-to-friend networking application."
+authors = ["Lars Petersen <info@lars-petersen.net>"]
+homepage = "https://github.com/lpeterse/shoreline"
+repository = "https://github.com/lpeterse/shoreline"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+bencode-minimal = { version = "0.1" }
+eframe = { version = "0.33.0", features = ["default"] }
+egui = { version = "0.33.0" }
+egui_extras = { version = "0.33.0" }
+env_logger = { version = "0.11" }
+human_bytes = { version = "0.4.3" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+log = { version = "0.4" }
+maxminddb = { version = "0.26", features = ["mmap"] }
+rand = { version = "0.9" }
+serde = { version = "1.0", features = ["derive"] }
+shoreline-dht = { path = "./shoreline-dht" }
+socket2 = { version = "0.6", features = ["all"] }
+tokio = { version = "1.48", features = ["full"] }
+toml = { version = "0.9", features = ["preserve_order"] }
+
+[profile.release]
+lto = true

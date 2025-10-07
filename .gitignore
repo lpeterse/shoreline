@@ -1,0 +1,7 @@
+target
+/*.mmdb
+/.shoreline
+Cargo.lock
+Makefile
+.DS_Store
+.cargo
