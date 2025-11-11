@@ -1,5 +1,7 @@
 mod dht;
+mod identity;
 
+use crate::app::identity::IdentityApp;
 use crate::{app::dht::DhtApp, mmdb::MMDB};
 use eframe::App;
 use eframe::egui;
@@ -11,8 +13,9 @@ use tokio::{runtime::Runtime, task::JoinHandle};
 pub struct MainApp {
     #[allow(dead_code)]
     rt: tokio::runtime::Runtime,
-    tab: &'static str,
-    tab_dht: DhtApp,
+    app: &'static str,
+    app_dht: DhtApp,
+    app_identity: IdentityApp,
     task: JoinHandle<()>,
 }
 
@@ -32,7 +35,7 @@ impl MainApp {
     pub const TAB_SETTINGS_DISPLAY: &'static str = "Settings";
     pub const TAB_DHT: &'static str = "dht";
     pub const TAB_DHT_DISPLAY: &'static str = "DHT";
-    pub const TAB_DEFAULT: &'static str = Self::TAB_DHT;
+    pub const TAB_DEFAULT: &'static str = Self::TAB_IDENTITY;
 
     pub fn new(ctx: Context, rt: Runtime, dht: Arc<DHT>, mmdb: MMDB) -> Self {
         let ctx = ctx.clone();
@@ -43,7 +46,9 @@ impl MainApp {
                 ctx.request_repaint();
             }
         });
-        Self { rt: rt, tab_dht: DhtApp::new(dht, mmdb), tab: Self::TAB_DEFAULT, task }
+        let app_dht = DhtApp::new(dht, mmdb);
+        let app_identity = IdentityApp::new();
+        Self { rt: rt, app_dht, app_identity, app: Self::TAB_DEFAULT, task }
     }
 }
 
@@ -54,25 +59,24 @@ impl Drop for MainApp {
 }
 
 impl App for MainApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.set_theme(Theme::Dark);
         TopBottomPanel::top("menu").show(ctx, |ui| {
             ui.add_space(3.0);
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Self::TAB_DASHBOARD, Self::TAB_DASHBOARD_DISPLAY);
-                ui.selectable_value(&mut self.tab, Self::TAB_IDENTITY, Self::TAB_IDENTITY_DISPLAY);
-                ui.selectable_value(&mut self.tab, Self::TAB_CLUSTER, Self::TAB_CLUSTER_DISPLAY);
-                ui.selectable_value(&mut self.tab, Self::TAB_CIRCLES, Self::TAB_CIRCLES_DISPLAY);
-                ui.selectable_value(&mut self.tab, Self::TAB_DHT, Self::TAB_DHT_DISPLAY);
-                ui.selectable_value(&mut self.tab, Self::TAB_SETTINGS, Self::TAB_SETTINGS_DISPLAY);
+                ui.selectable_value(&mut self.app, Self::TAB_DASHBOARD, Self::TAB_DASHBOARD_DISPLAY);
+                ui.selectable_value(&mut self.app, Self::TAB_IDENTITY, Self::TAB_IDENTITY_DISPLAY);
+                ui.selectable_value(&mut self.app, Self::TAB_CLUSTER, Self::TAB_CLUSTER_DISPLAY);
+                ui.selectable_value(&mut self.app, Self::TAB_CIRCLES, Self::TAB_CIRCLES_DISPLAY);
+                ui.selectable_value(&mut self.app, Self::TAB_DHT, Self::TAB_DHT_DISPLAY);
+                ui.selectable_value(&mut self.app, Self::TAB_SETTINGS, Self::TAB_SETTINGS_DISPLAY);
             });
             ui.add_space(1.0);
         });
 
-        match self.tab {
-            Self::TAB_DHT => {
-                self.tab_dht.update(ctx, _frame);
-            }
+        match self.app {
+            Self::TAB_DHT => self.app_dht.update(ctx, frame),
+            Self::TAB_IDENTITY => self.app_identity.update(ctx, frame),
             _ => {
                 CentralPanel::default().show(ctx, |ui| {
                     ui.centered_and_justified(|ui| {
@@ -82,5 +86,9 @@ impl App for MainApp {
                 });
             }
         }
+
+        TopBottomPanel::bottom("footer").show(ctx, |ui| {
+            ui.label(env!("CARGO_PKG_VERSION"));
+        });
     }
 }

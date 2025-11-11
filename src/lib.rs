@@ -2,6 +2,7 @@ pub mod config;
 pub mod util;
 pub mod mmdb;
 pub mod app;
+pub mod identity;
 
 pub const SEEDS: &[&str] = &[
     "[2001:41d0:203:4cca:5::]:6881", // dht.transmissionbt.com IPv6
