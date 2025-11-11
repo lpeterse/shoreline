@@ -55,12 +55,14 @@ impl Node {
         Version::SELF
     }
 
-    pub fn error(&self) -> Option<Arc<Error>> {
-        self.stat.borrow().error.clone()
-    }
-
+    /// Get this node's current [NodeStat]
     pub fn stat(&self) -> NodeStat {
         self.stat.borrow().clone()
+    }
+
+    ///
+    pub fn seed(&self, addr: SocketAddrV6) -> Result<(), Error> {
+        self.cmds.send(NodeCmd::Seed(addr.into())).map_err(|_| Error::NodeTerminated)
     }
 
     /// Suggest to connect to a [Peer] and eventually add it to the table

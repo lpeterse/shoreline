@@ -8,6 +8,7 @@ pub struct Id([u8; Self::BYTES]);
 
 impl Id {
     pub const BYTES: usize = 20;
+    pub const UNKNOWN: Self = Self([0; Self::BYTES]);
 
     pub fn from_bytes(bytes: &[u8; Self::BYTES]) -> Self {
         Self(*bytes)

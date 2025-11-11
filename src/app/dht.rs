@@ -161,7 +161,7 @@ impl eframe::App for DhtApp {
                                 ui.label(node.addr().to_string());
                             });
                             row.col(|ui| {
-                                ui.label(node.error().map(|e| e.to_string()).unwrap_or_default());
+                                ui.label(node.stat().error.map(|e| e.to_string()).unwrap_or_default());
                             });
                         });
 

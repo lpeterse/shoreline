@@ -109,6 +109,7 @@ impl PeerTask {
     /// This function handles incoming and outgoing messages, timeouts,
     /// and periodic pings. It will only return with error.
     async fn run_connected(&mut self, sock: &UdpSocket) -> Result<(), Error> {
+        log::error!("Connected to peer {}", self.pinf.addr);
         let mut rbuf = vec![0u8; Self::RBUF_SIZE];
 
         loop {
@@ -240,7 +241,7 @@ impl PeerTask {
         let t = msg.get(Msg::T).map(u64::from_be_bytes).ok_or(EPROTO)?;
         let r = msg.get::<&Value<'_>>(Msg::R).ok_or(EPROTO)?;
         let pid = r.get::<Id>(Msg::ID).ok_or(Error::PeerIdMissing)?;
-        check(pid == self.pinf.id).ok_or(Error::PeerIdMismatch)?;
+        check(self.pinf.id == pid || self.pinf.id == Id::UNKNOWN).ok_or(Error::PeerIdMismatch)?;
         if let Some(cmd) = self.trxs.resolve(t) {
             match cmd {
                 PeerCmd::Ping(cmd) => self.rcvd_response_ping(cmd).await?,

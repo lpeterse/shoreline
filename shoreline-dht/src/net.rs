@@ -1,6 +1,7 @@
-use std::sync::Arc;
 use ipnetwork::Ipv6Network;
+use std::sync::Arc;
 use tokio::sync::watch;
+use tokio::time::{Duration, interval};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InterfaceAddr {
@@ -21,15 +22,17 @@ impl std::fmt::Display for InterfaceAddr {
 #[derive(Debug, Clone)]
 pub struct Netwatch {
     #[allow(dead_code)]
-    task: Arc<AddressTask>,
+    task: Arc<NetwatchTask>,
     list: watch::Receiver<Vec<InterfaceAddr>>,
 }
 
 impl Netwatch {
+    const INTERVAL: Duration = Duration::from_secs(10);
+
     pub fn new() -> Self {
         let (list_, list) = watch::channel(vec![]);
         let task = tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+            let mut interval = interval(Self::INTERVAL);
             let list = list_;
             loop {
                 tokio::select! {
@@ -58,7 +61,10 @@ impl Netwatch {
                                     add = true;
                                 }
                                 if add {
-                                    addresses.push(InterfaceAddr { interface: interface.name.clone(), addr: v6.ip(), prefix: v6.prefix() });
+                                    let interface = interface.name.clone();
+                                    let addr = v6.ip();
+                                    let prefix = v6.prefix();
+                                    addresses.push(InterfaceAddr { interface, addr, prefix });
                                 }
                             }
                             _ => {}
@@ -73,7 +79,7 @@ impl Netwatch {
                 }
             }
         });
-        Self { list: list, task: Arc::new(AddressTask(task)) }
+        Self { list, task: Arc::new(NetwatchTask(task)) }
     }
 
     pub async fn changed(&mut self) {
@@ -100,9 +106,9 @@ impl Netwatch {
 }
 
 #[derive(Debug)]
-struct AddressTask(tokio::task::JoinHandle<()>);
+struct NetwatchTask(tokio::task::JoinHandle<()>);
 
-impl Drop for AddressTask {
+impl Drop for NetwatchTask {
     fn drop(&mut self) {
         self.0.abort();
     }

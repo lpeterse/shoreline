@@ -10,6 +10,7 @@ use super::stat::NodeStat;
 use super::table::Table;
 use bencode_minimal::Value;
 use std::collections::BTreeMap;
+use std::net::SocketAddrV6;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
@@ -70,7 +71,18 @@ impl<T: PeerDB> NodeTask<T> {
     async fn run_with_error(&mut self) {
         let mut socket = Socket::new(self.info.addr, &self.stat);
 
-        self.restore().await;
+        for seed in crate::SEEDS {
+            if let Ok(addrs) = tokio::net::lookup_host(seed).await {
+                for addr in addrs {
+                    if let std::net::SocketAddr::V6(addrv6) = addr {
+                        log::error!("Seeding DHT node with {}", addrv6);
+                        self.seed(addrv6);
+                    }
+                }
+            }
+        }
+
+        //self.restore().await;
 
         loop {
             tokio::select! {
@@ -79,6 +91,9 @@ impl<T: PeerDB> NodeTask<T> {
                 }
                 Some(cmd) = self.cmdr.recv() => {
                     match cmd {
+                        NodeCmd::Seed(addr) => {
+                            self.seed(addr);
+                        }
                         NodeCmd::GetNode(info, tx) => {
                             let peer = self.get(info);
                             let _ = tx.send(peer);
@@ -164,13 +179,25 @@ impl<T: PeerDB> NodeTask<T> {
         self.refresh.reset();
     }
 
+    fn seed(&mut self, addr: SocketAddrV6) {
+        let info = Info::new(Id::UNKNOWN, addr);
+        let peer = Peer::new(info, self.info, self.cmds.clone());
+        let this = self.info.id;
+        self.peers_info.spawn(async move { peer.find_node(&this).await.unwrap_or_default() });
+    }
+
     fn refresh(&mut self) {
-        let id = self.info.id;
         let xord = self.peers_xord.borrow();
-        let n = xord.len();
-        let r = rand::random_range(0..n);
-        if let Some(peer) = xord.values().nth(r).map(Weak::upgrade).flatten() {
-            self.peers_info.spawn(async move { peer.find_node(&id).await.unwrap_or_default() });
+        let id = if xord.len() < 16 {
+            Id::random()
+        } else {
+            self.info.id
+        };
+        if xord.len() > 0 {
+            let r = rand::random_range(0..xord.len());
+            if let Some(peer) = xord.values().nth(r).map(Weak::upgrade).flatten() {
+                self.peers_info.spawn(async move { peer.find_node(&id).await.unwrap_or_default() });
+            }
         }
     }
 
