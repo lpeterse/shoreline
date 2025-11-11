@@ -4,7 +4,6 @@ use super::super::common::Infos;
 use super::super::common::Msg;
 use super::super::{Id, Info, Peer};
 use super::cmd::NodeCmd;
-use super::peerdb::PeerDB;
 use super::socket::Socket;
 use super::stat::NodeStat;
 use super::table::Table;
@@ -15,24 +14,21 @@ use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::{JoinHandle, JoinSet};
-use tokio::time::{Duration, Instant, Interval, interval, interval_at};
+use tokio::time::{Duration, Interval, interval};
 
-pub struct NodeTask<T: PeerDB> {
+pub struct NodeTask {
     info: NodeInfo,
     stat: watch::Sender<NodeStat>,
     cmdr: mpsc::UnboundedReceiver<NodeCmd>,
     cmds: mpsc::WeakUnboundedSender<NodeCmd>,
-    backup: Interval,
     refresh: Interval,
-    peers_db: T,
     peers_xord: watch::Sender<BTreeMap<PeerId, Weak<Peer>>>,
     peers_info: JoinSet<Infos>,
     peers_init: JoinSet<Option<Arc<Peer>>>,
     peers_keep: Table,
 }
 
-impl<T: PeerDB> NodeTask<T> {
-    const BACKUP_INTERVAL: Duration = Duration::from_secs(60);
+impl NodeTask {
     const REFRESH_INTERVAL: Duration = Duration::from_secs(15);
     const BENCODE_MAX_ALLOCS: usize = 20;
 
@@ -41,7 +37,6 @@ impl<T: PeerDB> NodeTask<T> {
         stat: watch::Sender<NodeStat>,
         cmdr: mpsc::UnboundedReceiver<NodeCmd>,
         cmds: mpsc::WeakUnboundedSender<NodeCmd>,
-        peerdb: T,
         peers_watch: watch::Sender<BTreeMap<PeerId, Weak<Peer>>>,
     ) -> JoinHandle<()> {
         let s = Self {
@@ -49,10 +44,8 @@ impl<T: PeerDB> NodeTask<T> {
             stat,
             cmdr,
             cmds,
-            backup: interval_at(Instant::now() + Self::BACKUP_INTERVAL, Self::BACKUP_INTERVAL),
             refresh: interval(Self::REFRESH_INTERVAL),
             peers_xord: peers_watch,
-            peers_db: peerdb,
             peers_info: JoinSet::new(),
             peers_init: JoinSet::new(),
             peers_keep: Table::new(info.id),
@@ -64,25 +57,24 @@ impl<T: PeerDB> NodeTask<T> {
     ///
     /// This function runs until the node is shut down or an error occurs.
     async fn run(mut self: Box<Self>) {
-        self.run_with_error().await;
+        self.run_seeding().await;
+        self.run_loop().await;
     }
 
-    /// The main loop of the node task that can return an error
-    async fn run_with_error(&mut self) {
-        let mut socket = Socket::new(self.info.addr, &self.stat);
-
+    async fn run_seeding(&mut self) {
         for seed in crate::SEEDS {
             if let Ok(addrs) = tokio::net::lookup_host(seed).await {
                 for addr in addrs {
                     if let std::net::SocketAddr::V6(addrv6) = addr {
-                        log::error!("Seeding DHT node with {}", addrv6);
                         self.seed(addrv6);
                     }
                 }
             }
         }
+    }
 
-        //self.restore().await;
+    async fn run_loop(&mut self) {
+        let mut socket = Socket::new(self.info.addr, &self.stat);
 
         loop {
             tokio::select! {
@@ -118,9 +110,6 @@ impl<T: PeerDB> NodeTask<T> {
                 Some(res) = self.peers_init.join_next() => {
                     res.unwrap().into_iter().for_each(|p| self.peers_keep.insert(p));
                     self.schedule_refresh();
-                }
-                _ = self.backup.tick() => {
-                    self.backup().await;
                 }
                 _ = self.refresh.tick() => {
                     self.refresh();
@@ -198,19 +187,6 @@ impl<T: PeerDB> NodeTask<T> {
             if let Some(peer) = xord.values().nth(r).map(Weak::upgrade).flatten() {
                 self.peers_info.spawn(async move { peer.find_node(&id).await.unwrap_or_default() });
             }
-        }
-    }
-
-    async fn backup(&mut self) {
-        let peers = self.peers_keep.collect();
-        let infos = peers.into_iter().map(|p| *p.info()).collect::<Vec<_>>();
-        self.peers_db.store(infos).await;
-    }
-
-    async fn restore(&mut self) {
-        let infos = self.peers_db.load().await;
-        for info in infos {
-            self.suggest(info);
         }
     }
 

@@ -1,5 +1,4 @@
 mod cmd;
-mod peerdb;
 mod socket;
 mod stat;
 mod table;
@@ -15,7 +14,6 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 
 pub use self::cmd::NodeCmd;
-pub use self::peerdb::PeerDB;
 pub use self::stat::NodeStat;
 
 /// A client for the Mainline DHT network
@@ -29,14 +27,14 @@ pub struct Node {
 
 impl Node {
     /// Create a new [Node] node with the given [NodeInfo]
-    pub fn new<T: PeerDB>(info: NodeInfo, peerdb: T) -> Self {
+    pub fn new(info: NodeInfo) -> Self {
         let (stat_, stat) = watch::channel(NodeStat::default());
         let (peers_, peers) = watch::channel(BTreeMap::new());
         let cmds = mpsc::unbounded_channel();
         let cmdr = cmds.1;
         let cmds = cmds.0;
         let cmdw = cmds.downgrade();
-        let task = NodeTask::spawn(info, stat_, cmdr, cmdw, peerdb, peers_);
+        let task = NodeTask::spawn(info, stat_, cmdr, cmdw, peers_);
         Self { info, cmds, task, stat, peers }
     }
 

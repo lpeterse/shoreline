@@ -1,6 +1,6 @@
 use eframe::egui;
 use shoreline::app::MainApp;
-use shoreline::{config::Config, mmdb::MMDB, peerdb::PeerFile};
+use shoreline::{config::Config, mmdb::MMDB};
 use shoreline_dht::DHT;
 use std::sync::Arc;
 
@@ -12,8 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node: Result<(Arc<DHT>, MMDB), String> = rt.block_on(async {
         let dir = Config::dir().await.map_err(|e| e.to_string())?;
         let config = Config::load().await.map_err(|e| e.to_string())?;
-        let peerdb = PeerFile::new(dir.join("peers.csv"));
-        let dht = DHT::new(config.dht.node_id, config.dht.bind_port, peerdb.clone());
+        let dht = DHT::new(config.dht.node_id, config.dht.bind_port);
         let dht = Arc::new(dht);
         let mmdb = MMDB::new(dir.join("dbip-country.mmdb"));
         Ok((dht, mmdb))

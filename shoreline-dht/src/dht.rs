@@ -1,5 +1,5 @@
 use crate::net::Netwatch;
-use crate::{Node, NodeId, NodeInfo, PeerDB, net::InterfaceAddr};
+use crate::{Node, NodeId, NodeInfo, net::InterfaceAddr};
 use std::{collections::BTreeMap, net::SocketAddrV6, sync::Arc};
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -12,9 +12,9 @@ pub struct DHT {
 
 impl DHT {
     /// Create a new [Node] node with the given [NodeInfo]
-    pub fn new<T: PeerDB>(id: NodeId, port: u16, peerdb: T) -> Self {
+    pub fn new(id: NodeId, port: u16) -> Self {
         let (networks_tx, networks_rx) = watch::channel(BTreeMap::new());
-        let task = Task::spawn(id, port, networks_tx, peerdb);
+        let task = Task::spawn(id, port, networks_tx);
         Self { id, networks: networks_rx, task }
     }
 
@@ -33,23 +33,21 @@ impl Drop for DHT {
     }
 }
 
-pub struct Task<T: PeerDB> {
+pub struct Task {
     id: NodeId,
     port: u16,
-    peerdb: T,
     netwatch: Netwatch,
     networks: watch::Sender<BTreeMap<InterfaceAddr, Arc<Node>>>,
 }
 
-impl<T: PeerDB> Task<T> {
+impl Task {
     fn spawn(
         id: NodeId,
         port: u16,
-        networks: watch::Sender<BTreeMap<InterfaceAddr, Arc<Node>>>,
-        peerdb: T,
+        networks: watch::Sender<BTreeMap<InterfaceAddr, Arc<Node>>>
     ) -> JoinHandle<()> {
         let netwatch = Netwatch::new();
-        let self_ = Box::new(Self { id, netwatch, networks, peerdb, port });
+        let self_ = Box::new(Self { id, netwatch, networks, port });
         tokio::spawn(self_.run())
     }
 
@@ -63,7 +61,7 @@ impl<T: PeerDB> Task<T> {
                     if !current.contains_key(&d) {
                         let addr = SocketAddrV6::new(d.addr, self.port, 0, 0);
                         let info = NodeInfo::new(self.id, addr);
-                        let node = Node::new(info, self.peerdb.clone());
+                        let node = Node::new(info);
                         current.insert(d.clone(), Arc::new(node));
                     }
                 }
