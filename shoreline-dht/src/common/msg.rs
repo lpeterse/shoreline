@@ -15,6 +15,7 @@ impl Msg {
     pub const ID: &str = "id";
     pub const PING: &str = "ping";
     pub const TOKEN: &str = "token";
+    pub const TOKEN_VALUE: &str = "NONE";
     pub const TARGET: &str = "target";
     pub const INFO_HASH: &str = "info_hash";
     pub const FIND_NODE: &str = "find_node";

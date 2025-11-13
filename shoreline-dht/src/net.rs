@@ -1,36 +1,22 @@
-use ipnetwork::Ipv6Network;
+use std::collections::BTreeMap;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::time::{Duration, interval};
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct InterfaceAddr {
-    pub interface: String,
-    pub addr: std::net::Ipv6Addr,
-    pub prefix: u8,
-}
-
-impl std::fmt::Display for InterfaceAddr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prefix = self.prefix.min(128);
-        let network = Ipv6Network::new(self.addr, prefix).unwrap().network();
-        let network = Ipv6Network::new(network, prefix).unwrap();
-        write!(f, "{}: {}", self.interface, network)
-    }
-}
+use std::ops::Deref;
 
 #[derive(Debug, Clone)]
 pub struct Netwatch {
     #[allow(dead_code)]
     task: Arc<NetwatchTask>,
-    list: watch::Receiver<Vec<InterfaceAddr>>,
+    list: watch::Receiver<BTreeMap<String, Ipv6Addr>>,
 }
 
 impl Netwatch {
     const INTERVAL: Duration = Duration::from_secs(10);
 
     pub fn new() -> Self {
-        let (list_, list) = watch::channel(vec![]);
+        let (list_, list) = watch::channel(BTreeMap::new());
         let task = tokio::task::spawn(async move {
             let mut interval = interval(Self::INTERVAL);
             let list = list_;
@@ -41,7 +27,7 @@ impl Netwatch {
                         break;
                     }
                 }
-                let mut addresses = vec![];
+                let mut addresses = BTreeMap::new();
                 for interface in pnet_datalink::interfaces().iter().filter(|i| i.is_up() && !i.is_loopback()) {
                     // For each interface only consider the first GUA and ULA address.
                     // These are considered the stable addresses for the interface.
@@ -61,10 +47,7 @@ impl Netwatch {
                                     add = true;
                                 }
                                 if add {
-                                    let interface = interface.name.clone();
-                                    let addr = v6.ip();
-                                    let prefix = v6.prefix();
-                                    addresses.push(InterfaceAddr { interface, addr, prefix });
+                                    addresses.insert(interface.name.clone(), v6.ip());
                                 }
                             }
                             _ => {}
@@ -72,8 +55,7 @@ impl Netwatch {
                     }
                 }
                 let b = list.borrow();
-                let v: &Vec<InterfaceAddr> = b.as_ref();
-                if v != &addresses {
+                if b.deref() != &addresses {
                     drop(b);
                     let _ = list.send(addresses);
                 }
@@ -86,7 +68,7 @@ impl Netwatch {
         self.list.changed().await.unwrap();
     }
 
-    pub fn list(&self) -> Vec<InterfaceAddr> {
+    pub fn list(&self) -> BTreeMap<String, Ipv6Addr> {
         self.list.borrow().clone()
     }
 

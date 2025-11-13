@@ -1,56 +1,52 @@
-use crate::NodeInfo;
-use crate::PeerId;
 use super::super::common::Infos;
 use super::super::common::Msg;
-use super::super::{Id, Info, Peer};
-use super::cmd::NodeCmd;
-use super::socket::Socket;
+use super::super::{Id, Info, Link};
+use super::cmd::Command;
 use super::stat::NodeStat;
-use super::table::Table;
+use crate::Error;
+use crate::Node;
+use crate::Peers;
+use crate::constants::*;
+use crate::util::socket_bound;
 use bencode_minimal::Value;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::task::{JoinHandle, JoinSet};
-use tokio::time::{Duration, Interval, interval};
+use tokio::task::JoinSet;
+use tokio::time::{Interval, interval};
 
-pub struct NodeTask {
-    info: NodeInfo,
+pub struct Task {
+    node: Arc<Node>,
+    sock: UdpSocket,
     stat: watch::Sender<NodeStat>,
-    cmdr: mpsc::UnboundedReceiver<NodeCmd>,
-    cmds: mpsc::WeakUnboundedSender<NodeCmd>,
-    refresh: Interval,
-    peers_xord: watch::Sender<BTreeMap<PeerId, Weak<Peer>>>,
-    peers_info: JoinSet<Infos>,
-    peers_init: JoinSet<Option<Arc<Peer>>>,
-    peers_keep: Table,
+    cmds: mpsc::UnboundedReceiver<Command>,
+    intvl: Interval,
+    peers: Peers,
+    table: BTreeMap<usize, BTreeMap<SocketAddrV6, Arc<Link>>>,
+    infos: JoinSet<Infos>,
+    terms: JoinSet<Arc<Link>>,
 }
 
-impl NodeTask {
-    const REFRESH_INTERVAL: Duration = Duration::from_secs(15);
-    const BENCODE_MAX_ALLOCS: usize = 20;
-
-    pub fn spawn(
-        info: NodeInfo,
-        stat: watch::Sender<NodeStat>,
-        cmdr: mpsc::UnboundedReceiver<NodeCmd>,
-        cmds: mpsc::WeakUnboundedSender<NodeCmd>,
-        peers_watch: watch::Sender<BTreeMap<PeerId, Weak<Peer>>>,
-    ) -> JoinHandle<()> {
-        let s = Self {
-            info,
+impl Task {
+    pub fn spawn(node: Arc<Node>, peers: Peers, stat: watch::Sender<NodeStat>, cmds: mpsc::UnboundedReceiver<Command>) -> Result<(), Error> {
+        let sock = socket_bound(*node.addr()).map_err(Error::Socket)?;
+        let this = Self {
+            node,
+            sock,
             stat,
-            cmdr,
             cmds,
-            refresh: interval(Self::REFRESH_INTERVAL),
-            peers_xord: peers_watch,
-            peers_info: JoinSet::new(),
-            peers_init: JoinSet::new(),
-            peers_keep: Table::new(info.id),
+            intvl: interval(REFRESH_INTERVAL),
+            peers,
+            table: BTreeMap::new(),
+            infos: JoinSet::new(),
+            terms: JoinSet::new(),
         };
-        tokio::task::spawn(Box::new(s).run())
+        tokio::task::spawn(Box::new(this).run());
+        Ok(())
     }
 
     /// The main loop of the node task
@@ -59,6 +55,12 @@ impl NodeTask {
     async fn run(mut self: Box<Self>) {
         self.run_seeding().await;
         self.run_loop().await;
+
+        for bucket in self.table.into_values() {
+            for link in bucket.into_values() {
+                link.token().cancel();
+            }
+        }
     }
 
     async fn run_seeding(&mut self) {
@@ -66,7 +68,7 @@ impl NodeTask {
             if let Ok(addrs) = tokio::net::lookup_host(seed).await {
                 for addr in addrs {
                     if let std::net::SocketAddr::V6(addrv6) = addr {
-                        self.seed(addrv6);
+                        self.seed(addrv6).await;
                     }
                 }
             }
@@ -74,153 +76,174 @@ impl NodeTask {
     }
 
     async fn run_loop(&mut self) {
-        let mut socket = Socket::new(self.info.addr, &self.stat);
+        let mut rbuf = vec![0u8; RBUF_SIZE];
+        let mut sbuf = vec![0u8; RBUF_SIZE];
 
         loop {
             tokio::select! {
-                _ = socket.receive() => {
-                    socket.dispatch(|x,y,z| self.dispatch(x,y,z)).await;
-                }
-                Some(cmd) = self.cmdr.recv() => {
-                    match cmd {
-                        NodeCmd::Seed(addr) => {
-                            self.seed(addr);
-                        }
-                        NodeCmd::GetNode(info, tx) => {
-                            let peer = self.get(info);
-                            let _ = tx.send(peer);
-                        },
-                        NodeCmd::GetNodes(tx) => {
-                            let peers = self.peers_keep.collect();
-                            let _ = tx.send(peers);
-                        },
-                        NodeCmd::FindNode(id, tx) => {
-                            let peers = self.peers_keep.closest_n(&id, 8);
-                            let infos = peers.iter().map(|p| *p.info()).collect::<Vec<_>>();
-                            let _ = tx.send(Infos::from(infos));
-                        }
-                        NodeCmd::RemoveNode(node) => self.remove(node),
-                        NodeCmd::SuggestNode(info) => self.suggest(info),
+                res = self.sock.recv_from(&mut rbuf) => {
+                    if let Ok((len, SocketAddr::V6(addr))) = res {
+                        self.stat.send_modify(|s| s.add_rx_bytes(rbuf.len() as u64));
+                        sbuf.clear();
+                        self.dispatch(addr, &rbuf[..len], &mut sbuf).await;
                     }
                 }
-                Some(res) = self.peers_info.join_next() => {
+                Some(cmd) = self.cmds.recv() => {
+                    match cmd {
+                        Command::Seed(addr) => {
+                            self.seed(addr).await;
+                        }
+                        Command::FindNode(id, tx) => {
+                            let infos = self.find(&id);
+                            let _ = tx.send(infos);
+                        }
+                        Command::Suggest(info) => self.suggest(info),
+                    }
+                }
+                Some(res) = self.infos.join_next() => {
                     res.unwrap().iter().for_each(|i| self.suggest(*i));
-                    self.schedule_refresh();
                 }
-                Some(res) = self.peers_init.join_next() => {
-                    res.unwrap().into_iter().for_each(|p| self.peers_keep.insert(p));
-                    self.schedule_refresh();
+                Some(res) = self.terms.join_next() => {
+                    self.remove(res.unwrap());
                 }
-                _ = self.refresh.tick() => {
+                _ = self.intvl.tick() => {
                     self.refresh();
+                }
+                _ = self.node.token().cancelled() => {
+                    break;
                 }
             }
         }
     }
 
-    fn get(&mut self, info: Info) -> Arc<Peer> {
-        let xord = self.info.id.xor(&info.id);
-        if let Some(p) = self.peers_xord.borrow().get(&xord).and_then(|w| w.upgrade()) {
-            p
-        } else {
-            let p = Peer::new(info, self.info, self.cmds.clone());
-            let q = p.clone();
-            let _ = self.peers_xord.send_modify(|m| {
-                m.insert(xord, Arc::downgrade(&p));
-            });
-            let _ = self.peers_init.spawn(async move { q.init().await.ok().filter(|s| s.is_good()).map(|_| q) });
-            p
-        }
-    }
-
-    fn find(&self, target: &Id, n: usize) -> Infos {
-        self.peers_keep.closest_n(target, n).iter().map(|n| *n.info()).collect::<Vec<_>>().into()
-    }
-
-    fn remove(&mut self, id: Id) {
-        let xord = self.info.id.xor(&id);
-        let _ = self.peers_xord.send_modify(|m| {
-            m.remove(&xord);
-        });
-        let _ = self.peers_keep.remove(&id);
+    async fn seed(&mut self, addr: SocketAddrV6) {
+        let target = Id::random();
+        let buf = Msg::find_node_query(&[0], self.node.id(), &target).encode();
+        self.send(&buf, addr).await;
     }
 
     fn suggest(&mut self, info: Info) {
-        let xord = self.info.id.xor(&info.id);
-        if self.info.id != info.id && !self.peers_xord.borrow().contains_key(&xord) {
-            let p = Peer::new(info, self.info, self.cmds.clone());
-            let _ = self.peers_xord.send_modify(|m| {
-                m.insert(xord, Arc::downgrade(&p));
-            });
-            let _ = self.peers_init.spawn(async move { p.init().await.ok().filter(|s| s.is_good()).map(|_| p) });
-        }
-    }
-
-    fn schedule_refresh(&mut self) {
-        if self.peers_info.is_empty() && self.peers_init.is_empty() {
-            let n = self.peers_keep.count_good();
-            if n > 0 {
-                let d = Duration::from_millis(1000 * n as u64);
-                self.refresh.reset_after(d);
-                return;
+        if &info.id != self.node.id() && !info.id.is_null() {
+            let bucket = self.node.id().similarity(&info.id);
+            let bucket = self.table.entry(bucket).or_default();
+            if !bucket.contains_key(&info.addr) && bucket.len() < BUCKET_MAX_LEN {
+                let peer = self.peers.get(&info.id);
+                let link = peer.connect(&self.node, &info.addr);
+                bucket.insert(info.addr, link.clone());
+                self.terms.spawn(async move {
+                    link.token().cancelled().await;
+                    link
+                });
             }
         }
-        self.refresh.reset();
     }
 
-    fn seed(&mut self, addr: SocketAddrV6) {
-        let info = Info::new(Id::UNKNOWN, addr);
-        let peer = Peer::new(info, self.info, self.cmds.clone());
-        let this = self.info.id;
-        self.peers_info.spawn(async move { peer.find_node(&this).await.unwrap_or_default() });
+    fn remove(&mut self, link: Arc<Link>) {
+        let bucket = self.node.id().similarity(link.peer().id());
+        if let Some(link) = self.table.get_mut(&bucket).and_then(|b| b.remove(link.addr())) {
+            link.token().cancel();
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.table.values().map(|b| b.len()).sum()
+    }
+
+    fn random(&self) -> Option<Arc<Link>> {
+        let count = self.count();
+        if count == 0 {
+            return None;
+        }
+        let idx = rand::random::<u32>() as usize % count;
+        let mut n = 0;
+        for bucket in self.table.values() {
+            for link in bucket.values() {
+                if n == idx {
+                    return Some(link.clone());
+                }
+                n += 1;
+            }
+        }
+        None
     }
 
     fn refresh(&mut self) {
-        let xord = self.peers_xord.borrow();
-        let id = if xord.len() < 16 {
+        let id = if self.count() < 16 {
             Id::random()
         } else {
-            self.info.id
+            *self.node.id()
         };
-        if xord.len() > 0 {
-            let r = rand::random_range(0..xord.len());
-            if let Some(peer) = xord.values().nth(r).map(Weak::upgrade).flatten() {
-                self.peers_info.spawn(async move { peer.find_node(&id).await.unwrap_or_default() });
-            }
+        if let Some(peer) = self.random() {
+            self.infos.spawn(async move { peer.find_node(&id).await.unwrap_or_default() });
         }
     }
 
-    fn dispatch(&mut self, addr: &std::net::SocketAddrV6, rbuf: &[u8], sbuf: &mut Vec<u8>) -> Option<()> {
-        let v = Value::decode(rbuf, Self::BENCODE_MAX_ALLOCS)?;
+    fn find(&self, target: &Id) -> Infos {
+        let mut infos = vec![];
+        let start = self.node.id().similarity(target);
+        for bucket in start..160 {
+            if let Some(b) = self.table.get(&bucket) {
+                for link in b.values() {
+                    infos.push(Info::new(*link.peer().id(), *link.addr()));
+                    if infos.len() >= 8 {
+                        break;
+                    }
+                }
+            }
+        }
+        Infos::from(infos)
+    }
 
-        let _ = v.get::<&str>(Msg::Y).filter(|y| *y == Msg::Q)?;
-        let t = v.get::<&[u8]>(Msg::T)?;
-        let q = v.get::<&str>(Msg::Q)?;
-        let a = v.get::<&Value>(Msg::A)?;
-        let id = a.get::<Id>(Msg::ID)?;
+    async fn dispatch(&mut self, addr: std::net::SocketAddrV6, rbuf: &[u8], sbuf: &mut Vec<u8>) -> Option<()> {
+        let v = Value::decode(rbuf, BENCODE_MAX_ALLOCS)?;
 
-        match q {
-            Msg::PING => {
-                Msg::ping_response(t, &self.info.id).encode_into(sbuf);
+        match v.get::<&str>(Msg::Y)? {
+            Msg::Q => {
+                let q = v.get::<&str>(Msg::Q)?;
+                let a = v.get::<&Value>(Msg::A)?;
+                let t = v.get::<&[u8]>(Msg::T)?;
+                let id = a.get::<Id>(Msg::ID)?;
+                match q {
+                    Msg::PING => {
+                        Msg::ping_response(t, self.node.id()).encode_into(sbuf);
+                    }
+                    Msg::FIND_NODE => {
+                        let target = a.get::<Id>(Msg::TARGET)?;
+                        let nodes6 = self.find(&target).encode();
+                        Msg::find_node_response(t, self.node.id(), &nodes6).encode_into(sbuf);
+                    }
+                    Msg::GET_PEERS => {
+                        let info_hash = a.get::<Id>(Msg::INFO_HASH)?;
+                        let nodes6 = self.find(&info_hash).encode();
+                        let token = Msg::TOKEN_VALUE.as_bytes();
+                        Msg::get_peers_response(t, self.node.id(), token, &nodes6).encode_into(sbuf);
+                    }
+                    Msg::ANNOUNCE_PEER => {
+                        Msg::announce_peer_response(t, self.node.id()).encode_into(sbuf);
+                    }
+                    _ => (),
+                }
+                self.suggest(Info::new(id, addr));
             }
-            Msg::FIND_NODE => {
-                let target = a.get::<Id>(Msg::TARGET)?;
-                let nodes6 = self.find(&target, 8).encode();
-                Msg::find_node_response(t, &self.info.id, &nodes6).encode_into(sbuf);
+            Msg::R => {
+                let r = v.get::<&Value>(Msg::R)?;
+                if let Some(infos) = r.get::<&[u8]>(Msg::NODES6).and_then(Infos::decode) {
+                    infos.iter().for_each(|info| self.suggest(*info));
+                }
             }
-            Msg::GET_PEERS => {
-                let info_hash = a.get::<Id>(Msg::INFO_HASH)?;
-                let nodes6 = self.find(&info_hash, 8).encode();
-                let token = b"FIXME"; // FIXME: implement tokens
-                Msg::get_peers_response(t, &self.info.id, token, &nodes6).encode_into(sbuf);
-            }
-            Msg::ANNOUNCE_PEER => {
-                Msg::announce_peer_response(t, &self.info.id).encode_into(sbuf);
-            }
-            _ => (),
+            _ => ()
+        };
+
+        if !sbuf.is_empty() {
+            self.send(sbuf, addr).await?;
         }
 
-        self.suggest(Info::new(id, *addr));
+        Some(())
+    }
+
+    async fn send(&mut self, sbuf: &[u8], addr: SocketAddrV6) -> Option<()> {
+        let len = self.sock.send_to(&sbuf, addr).await.ok()?;
+        self.stat.send_modify(|s| s.add_tx_bytes(len as u64));
         Some(())
     }
 }

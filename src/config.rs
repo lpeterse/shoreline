@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf};
-use shoreline_dht::{NodeId};
+use shoreline_dht::Id;
+use std::path::PathBuf;
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -11,7 +11,7 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DhtConfig {
-    pub node_id: NodeId,
+    pub node_id: Id,
     pub bind_port: u16,
 }
 
@@ -56,11 +56,6 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            dht: DhtConfig {
-                node_id: NodeId::random(),
-                bind_port: 6881
-            },
-        }
+        Self { dht: DhtConfig { node_id: Id::random(), bind_port: 6881 } }
     }
 }

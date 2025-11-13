@@ -1,32 +1,32 @@
-use super::super::peer::stat::PeerStat;
+use crate::link::stat::Stat;
 use crate::util::check;
 use std::collections::BTreeMap;
 use tokio::sync::watch;
 use tokio::time::{Duration, Instant, sleep_until};
+use crate::constants::*;
 
-use super::cmd::PeerCmd;
-use super::task::PeerTask;
+use super::cmd::Command;
 
 pub struct Trxs {
     txid: u64,
-    stat: watch::Sender<PeerStat>,
-    queue: BTreeMap<u64, (Instant, PeerCmd)>,
+    stat: watch::Sender<Stat>,
+    queue: BTreeMap<u64, (Instant, Command)>,
     timeout: Instant,
 }
 
 impl Trxs {
-    pub fn new(stat: &watch::Sender<PeerStat>) -> Self {
+    pub fn new(stat: &watch::Sender<Stat>) -> Self {
         Self { txid: 0, stat: stat.clone(), queue: BTreeMap::new(), timeout: Instant::now() }
     }
 
-    pub fn start<T: Into<PeerCmd>>(&mut self, cmd: T) -> u64 {
+    pub fn start<T: Into<Command>>(&mut self, cmd: T) -> u64 {
         self.txid += 1;
         self.queue.insert(self.txid, (Instant::now(), cmd.into()));
         self.set_timeout();
         self.txid
     }
 
-    pub fn resolve(&mut self, id: u64) -> Option<PeerCmd> {
+    pub fn resolve(&mut self, id: u64) -> Option<Command> {
         let (created, cmd) = self.queue.remove(&id)?;
         let rtt = created.elapsed();
         self.set_rtt(rtt);
@@ -34,7 +34,7 @@ impl Trxs {
         Some(cmd)
     }
 
-    pub async fn timeout_next(&mut self) -> Option<PeerCmd> {
+    pub async fn timeout_next(&mut self) -> Option<Command> {
         check(!self.queue.is_empty())?;
         sleep_until(self.timeout).await;
         let (_, (_, cmd)) = self.queue.pop_first()?;
@@ -64,7 +64,7 @@ impl Trxs {
         self.stat
             .borrow()
             .rtt
-            .map(|x| x.mul_f32(PeerTask::TIMEOUT_FACTOR))
-            .unwrap_or(PeerTask::TIMEOUT_DEFAULT)
+            .map(|x| x.mul_f32(TIMEOUT_FACTOR))
+            .unwrap_or(TIMEOUT_INIT)
     }
 }

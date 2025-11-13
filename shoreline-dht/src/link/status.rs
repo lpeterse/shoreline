@@ -4,8 +4,8 @@ use std::fmt::Display;
 pub enum Status {
     Init,
     Good,
-    Miss,
     Fail,
+    Term,
 }
 
 impl Status {
@@ -14,7 +14,7 @@ impl Status {
     }
 
     pub fn is_expendable(&self) -> bool {
-        matches!(self, Status::Miss | Status::Fail)
+        matches!(self, Status::Fail | Status::Term)
     }
 }
 
@@ -29,8 +29,9 @@ impl Display for Status {
         match self {
             Status::Init => write!(f, "INIT"),
             Status::Good => write!(f, "GOOD"),
-            Status::Miss => write!(f, "MISS"),
             Status::Fail => write!(f, "FAIL"),
+            Status::Term => write!(f, "TERM"),
         }
     }
 }
+ 

@@ -1,14 +1,11 @@
-use super::super::{Peer, Id, Info};
+use super::super::{Id, Info};
 use super::super::common::Infos;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
 use tokio::sync::oneshot;
 
-pub enum NodeCmd {
+#[derive(Debug)]
+pub enum Command {
     Seed(SocketAddrV6),
-    GetNode(Info, oneshot::Sender<Arc<Peer>>),
-    GetNodes(oneshot::Sender<Vec<Arc<Peer>>>),
+    Suggest(Info),
     FindNode(Id, oneshot::Sender<Infos>),
-    RemoveNode(Id),
-    SuggestNode(Info),
 }

@@ -1,54 +1,37 @@
 use std::fmt;
+use crate::constants::*;
 
 #[derive(Debug)]
 pub enum Error {
-    NodeDropped,
     NodeTerminated,
-    PeerDropped,
-    PeerTerminated,
-    PeerIdMissing,
-    PeerIdMismatch,
-    PeerInitTimeout,
-    PeerNotConnected,
-    PeerQueryTimeout,
-    PeerQueryError(i64, String),
-    PeerBencodeInvalid,
-    PeerProtocolViolation,
+    LinkTerminated,
+    IdMissing,
+    IdMismatch,
+    InitTimeout,
+    TotalTimeout,
+    QueryTimeout,
+    QueryError(i64, String),
+    BencodeInvalid,
+    ProtocolViolation,
     Socket(std::io::Error),
-    Other(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NodeDropped => write!(f, "Node dropped"),
             Self::NodeTerminated => write!(f, "Node terminated"),
-            Self::PeerDropped => write!(f, "Peer dropped"),
-            Self::PeerTerminated => write!(f, "Peer terminated"),
-            Self::PeerIdMissing => write!(f, "Peer ID missing"),
-            Self::PeerIdMismatch => write!(f, "Peer ID mismatch"),
-            Self::PeerInitTimeout => write!(f, "Peer init timed out"),
-            Self::PeerNotConnected => write!(f, "Peer not connected"),
-            Self::PeerBencodeInvalid => write!(f, "Peer sent invalid bencode"),
-            Self::PeerProtocolViolation => write!(f, "Peer protocol violation"),
-            Self::PeerQueryError(code, msg) => write!(f, "Peer sent error code {}: {}", code, msg),
-            Self::PeerQueryTimeout => write!(f, "Peer command timed out"),
-            Self::Socket(err) => write!(f, "Socket: {}", err),
-            Self::Other(msg) => write!(f, "Error: {}", msg),
+            Self::LinkTerminated => write!(f, "Link terminated"),
+            Self::IdMissing => write!(f, "ID missing"),
+            Self::IdMismatch => write!(f, "ID mismatch"),
+            Self::InitTimeout => write!(f, "Init timed out after {}s", TIMEOUT_INIT.as_secs()),
+            Self::QueryTimeout => write!(f, "Query timed out after {}x RTT", TIMEOUT_FACTOR),
+            Self::TotalTimeout => write!(f, "Unresponsive for more than {}s", TIMEOUT_TOTAL.as_secs()),
+            Self::BencodeInvalid => write!(f, "Received invalid bencode"),
+            Self::ProtocolViolation => write!(f, "Protocol violation"),
+            Self::QueryError(code, msg) => write!(f, "Received error code {}: {}", code, msg),
+            Self::Socket(err) => write!(f, "{}", err),
         }
     }
 }
 
 impl std::error::Error for Error {}
-
-impl From<&'static str> for Error {
-    fn from(msg: &'static str) -> Self {
-        Self::Other(msg.into())
-    }
-}
-
-impl From<String> for Error {
-    fn from(msg: String) -> Self {
-        Self::Other(msg.into())
-    }
-}

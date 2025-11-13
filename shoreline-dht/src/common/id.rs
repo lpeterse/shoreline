@@ -53,6 +53,10 @@ impl Id {
         cnt
     }
 
+    pub fn distance(&self, other: &Self) -> usize {
+        Self::BYTES * 8 - self.similarity(other)
+    }
+
     pub fn random() -> Self {
         Self(rand::random())
     }
@@ -75,6 +79,10 @@ impl Id {
         x[q] = (a & m0) | (!a & m1) | (b & m2);
 
         Self(x)
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.0.iter().all(|&x| x == 0)
     }
 }
 
