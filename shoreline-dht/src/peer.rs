@@ -10,6 +10,7 @@ use self::task::PeerTask;
 use super::common::Infos;
 use super::node::NodeCmd;
 use super::{Error, Id, Info, Version};
+use crate::util::socket_connected;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -29,13 +30,14 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(pinf: Info, ninf: Info, ncmd: mpsc::WeakUnboundedSender<NodeCmd>) -> Arc<Self> {
+    pub fn new(pinf: Info, ninf: Info, ncmd: mpsc::WeakUnboundedSender<NodeCmd>) -> Result<Arc<Self>, Error> {
+        let sock = socket_connected(&ninf.addr, &pinf.addr).map_err(Error::Socket)?;
         let (pcmd, pcmd_) = mpsc::unbounded_channel();
         let (stat, stat_) = watch::channel(PeerStat::default());
         let ncmd_ = ncmd.clone();
-        let task = PeerTask::spawn(pinf, ninf, pcmd_, ncmd_, stat);
+        let task = PeerTask::spawn(pinf, ninf, sock, pcmd_, ncmd_, stat);
         let self_ = Self { pinf, task, pcmd, ncmd, stat: stat_ };
-        Arc::new(self_)
+        Ok(Arc::new(self_))
     }
 
     pub fn id(&self) -> &Id {

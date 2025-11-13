@@ -3,7 +3,8 @@ use eframe::egui;
 use egui::*;
 use egui_extras::{Column, TableBuilder};
 use shoreline_dht::{DHT, InterfaceAddr};
-use std::sync::Arc;
+use std::{sync::Arc};
+use tokio::time::Instant;
 
 pub struct DhtApp {
     dht: Arc<DHT>,
@@ -167,13 +168,20 @@ impl eframe::App for DhtApp {
 
                         let ps = node.peers().borrow();
                         for peer in ps.iter().filter_map(|(_, w)| w.upgrade()) {
-                            let rtt = peer.rtt().map(|x| x.as_secs_f32()).unwrap_or(5.0) * 1000.0;
+                            let stat = {peer.stat().borrow().clone()};
+                            let rtt = stat.rtt.map(|x| x.as_secs_f32()).unwrap_or(5.0) * 1000.0;
                             let rtt = rtt.log10();
                             let rtt = (rtt / 3.0).min(1.0).max(0.0);
-                            let bg = match peer.status() {
+                            let bg = match stat.status {
                                 shoreline_dht::Status::Init => Color32::BLUE.gamma_multiply(0.5),
                                 shoreline_dht::Status::Good => Color32::GREEN.gamma_multiply(1.0 - rtt),
-                                shoreline_dht::Status::Miss => Color32::YELLOW.gamma_multiply(0.5),
+                                shoreline_dht::Status::Miss => {
+                                    let t = stat.rx_last.unwrap_or_else(|| Instant::now()).elapsed().as_secs_f32();
+                                    let t = 1.0 - (t / 300.0).min(1.0);
+                                    let bg = Color32::RED;
+                                    let fg = Color32::YELLOW.gamma_multiply(t);
+                                    bg.blend(fg).gamma_multiply(0.5)
+                                }
                                 shoreline_dht::Status::Fail => Color32::RED.gamma_multiply(0.5),
                             };
                             body.row(18.0, |mut row| {

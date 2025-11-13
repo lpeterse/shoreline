@@ -1,3 +1,4 @@
+use crate::Error;
 use crate::NodeInfo;
 use crate::PeerId;
 use super::super::common::Infos;
@@ -25,7 +26,7 @@ pub struct NodeTask {
     peers_xord: watch::Sender<BTreeMap<PeerId, Weak<Peer>>>,
     peers_info: JoinSet<Infos>,
     peers_init: JoinSet<Option<Arc<Peer>>>,
-    peers_keep: Table,
+    peers_rtbl: Table,
 }
 
 impl NodeTask {
@@ -48,7 +49,7 @@ impl NodeTask {
             peers_xord: peers_watch,
             peers_info: JoinSet::new(),
             peers_init: JoinSet::new(),
-            peers_keep: Table::new(info.id),
+            peers_rtbl: Table::new(info.id),
         };
         tokio::task::spawn(Box::new(s).run())
     }
@@ -91,11 +92,11 @@ impl NodeTask {
                             let _ = tx.send(peer);
                         },
                         NodeCmd::GetNodes(tx) => {
-                            let peers = self.peers_keep.collect();
+                            let peers = self.peers_rtbl.collect();
                             let _ = tx.send(peers);
                         },
                         NodeCmd::FindNode(id, tx) => {
-                            let peers = self.peers_keep.closest_n(&id, 8);
+                            let peers = self.peers_rtbl.closest_n(&id, 8);
                             let infos = peers.iter().map(|p| *p.info()).collect::<Vec<_>>();
                             let _ = tx.send(Infos::from(infos));
                         }
@@ -108,7 +109,7 @@ impl NodeTask {
                     self.schedule_refresh();
                 }
                 Some(res) = self.peers_init.join_next() => {
-                    res.unwrap().into_iter().for_each(|p| self.peers_keep.insert(p));
+                    res.unwrap().into_iter().for_each(|p| self.peers_rtbl.insert(p));
                     self.schedule_refresh();
                 }
                 _ = self.refresh.tick() => {
@@ -118,23 +119,23 @@ impl NodeTask {
         }
     }
 
-    fn get(&mut self, info: Info) -> Arc<Peer> {
+    fn get(&mut self, info: Info) -> Result<Arc<Peer>, Error> {
         let xord = self.info.id.xor(&info.id);
         if let Some(p) = self.peers_xord.borrow().get(&xord).and_then(|w| w.upgrade()) {
-            p
+            Ok(p)
         } else {
-            let p = Peer::new(info, self.info, self.cmds.clone());
+            let p = Peer::new(info, self.info, self.cmds.clone())?;
             let q = p.clone();
             let _ = self.peers_xord.send_modify(|m| {
                 m.insert(xord, Arc::downgrade(&p));
             });
             let _ = self.peers_init.spawn(async move { q.init().await.ok().filter(|s| s.is_good()).map(|_| q) });
-            p
+            Ok(p)
         }
     }
 
     fn find(&self, target: &Id, n: usize) -> Infos {
-        self.peers_keep.closest_n(target, n).iter().map(|n| *n.info()).collect::<Vec<_>>().into()
+        self.peers_rtbl.closest_n(target, n).iter().map(|n| *n.info()).collect::<Vec<_>>().into()
     }
 
     fn remove(&mut self, id: Id) {
@@ -142,23 +143,24 @@ impl NodeTask {
         let _ = self.peers_xord.send_modify(|m| {
             m.remove(&xord);
         });
-        let _ = self.peers_keep.remove(&id);
+        let _ = self.peers_rtbl.remove(&id);
     }
 
     fn suggest(&mut self, info: Info) {
         let xord = self.info.id.xor(&info.id);
         if self.info.id != info.id && !self.peers_xord.borrow().contains_key(&xord) {
-            let p = Peer::new(info, self.info, self.cmds.clone());
-            let _ = self.peers_xord.send_modify(|m| {
-                m.insert(xord, Arc::downgrade(&p));
-            });
-            let _ = self.peers_init.spawn(async move { p.init().await.ok().filter(|s| s.is_good()).map(|_| p) });
+            if let Ok(p) = Peer::new(info, self.info, self.cmds.clone()) {
+                let _ = self.peers_xord.send_modify(|m| {
+                    m.insert(xord, Arc::downgrade(&p));
+                });
+                let _ = self.peers_init.spawn(async move { p.init().await.ok().filter(|s| s.is_good()).map(|_| p) });
+            }
         }
     }
 
     fn schedule_refresh(&mut self) {
         if self.peers_info.is_empty() && self.peers_init.is_empty() {
-            let n = self.peers_keep.count_good();
+            let n = self.peers_rtbl.count_good();
             if n > 0 {
                 let d = Duration::from_millis(1000 * n as u64);
                 self.refresh.reset_after(d);
@@ -170,9 +172,10 @@ impl NodeTask {
 
     fn seed(&mut self, addr: SocketAddrV6) {
         let info = Info::new(Id::UNKNOWN, addr);
-        let peer = Peer::new(info, self.info, self.cmds.clone());
-        let this = self.info.id;
-        self.peers_info.spawn(async move { peer.find_node(&this).await.unwrap_or_default() });
+        if let Ok(peer) = Peer::new(info, self.info, self.cmds.clone()) {
+            let this = self.info.id;
+            self.peers_info.spawn(async move { peer.find_node(&this).await.unwrap_or_default() });
+        }
     }
 
     fn refresh(&mut self) {

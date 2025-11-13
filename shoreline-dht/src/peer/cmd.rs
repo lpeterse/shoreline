@@ -2,6 +2,7 @@ use super::super::common::{Id, Infos};
 use super::super::Error;
 use tokio::sync::oneshot;
 
+#[derive(Debug)]
 pub enum PeerCmd {
     Ping(CmdPing),
     FindNode(CmdFindNode),
@@ -20,6 +21,7 @@ impl PeerCmd {
     }
 }
 
+#[derive(Debug)]
 pub struct CmdPing {
     pub response: oneshot::Sender<Result<(), Error>>,
 }
@@ -31,6 +33,7 @@ impl CmdPing {
     }
 }
 
+#[derive(Debug)]
 pub struct CmdFindNode {
     pub target: Id,
     pub response: oneshot::Sender<Result<Infos, Error>>,

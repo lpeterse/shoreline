@@ -109,7 +109,7 @@ impl Node {
     pub async fn peer(&self, info: &PeerInfo) -> Result<Arc<Peer>, Error> {
         let (tx, rx) = oneshot::channel();
         self.cmds.send(NodeCmd::GetNode(info.clone(), tx)).map_err(|_| Error::NodeTerminated)?;
-        rx.await.map_err(|_| Error::NodeTerminated)
+        Ok(rx.await.map_err(|_| Error::NodeTerminated)??)
     }
 
     /// Get a list of known [Peer]s

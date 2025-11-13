@@ -1,14 +1,14 @@
 use super::super::Error;
 use super::super::common::Infos;
 use super::super::common::*;
+use super::super::node::NodeCmd;
+use super::super::peer::stat::PeerStat;
 use super::super::{Id, Info, Version};
 use super::cmd::{CmdFindNode, CmdPing, PeerCmd};
 use super::status::Status;
 use super::trxs::Trxs;
+use crate::util::check;
 use bencode_minimal::Value;
-use super::super::node::NodeCmd;
-use super::super::peer::stat::PeerStat;
-use crate::util::{Backoff, check, socket_connected};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -22,28 +22,28 @@ const EPROTO: Error = Error::PeerProtocolViolation;
 pub struct PeerTask {
     pinf: Info,
     ninf: Info,
+    sock: UdpSocket,
     pcmd: mpsc::UnboundedReceiver<PeerCmd>,
     ncmd: mpsc::WeakUnboundedSender<NodeCmd>,
     stat: watch::Sender<PeerStat>,
     ping: Interval,
     trxs: Trxs,
     qrys: JoinSet<Result<Vec<u8>, Error>>,
-    boff: Backoff,
 }
 
 impl PeerTask {
-    const RBUF_SIZE: usize = 1500;
-
     pub const TIMEOUT_FACTOR: f32 = 3.0;
     pub const TIMEOUT_DEFAULT: Duration = Duration::from_secs(10);
-    pub const PING_INTERVAL: Duration = Duration::from_secs(25);
-    pub const PING_STARTUP_DELAY: Duration = Duration::from_millis(10);
-    pub const RETRY_WAIT_MAX: Duration = Duration::from_secs(300);
-    pub const BENCODE_MAX_ALLOCS: usize = 20;
+
+    const RBUF_SIZE: usize = 1500;
+    const PING_INTERVAL: Duration = Duration::from_secs(25);
+    const PING_STARTUP_DELAY: Duration = Duration::from_millis(10);
+    const BENCODE_MAX_ALLOCS: usize = 20;
 
     pub fn spawn(
         pinf: Info,
         ninf: Info,
+        sock: UdpSocket,
         pcmd: mpsc::UnboundedReceiver<PeerCmd>,
         ncmd: mpsc::WeakUnboundedSender<NodeCmd>,
         stat: watch::Sender<PeerStat>,
@@ -51,12 +51,12 @@ impl PeerTask {
         let s = Self {
             pinf,
             ninf,
+            sock,
             pcmd,
             ncmd,
             ping: interval_at(Instant::now() + Self::PING_STARTUP_DELAY, Self::PING_INTERVAL),
             trxs: Trxs::new(&stat),
             qrys: JoinSet::new(),
-            boff: Backoff::new(Self::RETRY_WAIT_MAX),
             stat,
         };
         tokio::task::spawn(Box::new(s).run())
@@ -68,38 +68,11 @@ impl PeerTask {
     /// successful. While not connected, it will reject incoming commands with
     /// [Error::PeerNotConnected].
     async fn run(mut self: Box<Self>) {
-        'reconnect: loop {
-            tokio::select! {
-                // Attempt to connect after exponential backoff. The first attempt
-                // succeeds immediately. Returns only on fatal socket error. On other
-                // errors, it sets the error state and continues the loop.
-                _ = self.boff.tick() => {
-                    let bind = &self.ninf.addr;
-                    let conn = &self.pinf.addr;
-                    let sock = match socket_connected(bind, conn) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            self.set_fail(Error::Socket(e));
-                            continue 'reconnect;
-                        }
-                    };
-                    while let Err(e) = self.run_connected(&sock).await {
-                        if matches!(e, Error::Socket(_)) {
-                            self.set_fail(e);
-                            continue 'reconnect;
-                        } else {
-                            self.set_fail(e);
-                        }
-                    }
-                }
-                // Reject incoming commands while not connected
-                Some(cmd) = self.pcmd.recv() => {
-                    cmd.reject(Error::PeerNotConnected);
-                }
-                // Reject timed-out transactions while not connected
-                Some(cmd) = self.trxs.timeout_next() => {
-                    cmd.reject(Error::PeerNotConnected);
-                }
+        let mut rbuf = vec![0u8; Self::RBUF_SIZE];
+
+        loop {
+            if let Err(e) = self.run_connected(&mut rbuf).await {
+                self.set_fail(e);
             }
         }
     }
@@ -108,24 +81,22 @@ impl PeerTask {
     ///
     /// This function handles incoming and outgoing messages, timeouts,
     /// and periodic pings. It will only return with error.
-    async fn run_connected(&mut self, sock: &UdpSocket) -> Result<(), Error> {
-        let mut rbuf = vec![0u8; Self::RBUF_SIZE];
-
+    async fn run_connected(&mut self, rbuf: &mut [u8]) -> Result<(), Error> {
         loop {
             tokio::select! {
                 // Periodic ping if nothing else has been sent recently
                 _ = self.ping.tick() => {
                     let cmd = CmdPing::new().0;
-                    self.exec_ping(cmd, &sock).await?;
+                    self.exec_ping(cmd).await?;
                 }
                 // Incoming message
-                res = sock.recv(&mut rbuf) => {
+                res = self.sock.recv(rbuf) => {
                     let len = res.map_err(Error::Socket)?;
-                    self.rcvd(&rbuf[..len], &sock).await?;
+                    self.rcvd(&rbuf[..len]).await?;
                 }
                 // Incoming command
                 Some(cmd) = self.pcmd.recv() => {
-                    self.exec(cmd, &sock).await?;
+                    self.exec(cmd).await?;
                 }
                 // Transaction timeout
                 Some(cmd) = self.trxs.timeout_next() => {
@@ -135,23 +106,22 @@ impl PeerTask {
                 // Completed query
                 Some(res) = self.qrys.join_next() => {
                     let msg = res.unwrap()?;
-                    self.send(&msg, &sock).await?;
+                    self.send(&msg).await?;
                 }
             }
         }
     }
 
     /// Handle received message (either query, response or error)
-    async fn rcvd(&mut self, buf: &[u8], sock: &UdpSocket) -> Result<(), Error> {
+    async fn rcvd(&mut self, buf: &[u8]) -> Result<(), Error> {
         self.stat.send_modify(|s| {
-            s.add_rx_packets(1);
             s.add_rx_bytes(buf.len() as u64);
         });
         let msg = Value::decode(buf, Self::BENCODE_MAX_ALLOCS).ok_or(Error::PeerBencodeInvalid)?;
         let y = msg.get::<&str>(Msg::Y).ok_or(EPROTO)?;
         self.set_version(msg.get::<Version>(Msg::V));
         match y {
-            Msg::Q => self.rcvd_query(&msg, sock).await,
+            Msg::Q => self.rcvd_query(&msg).await,
             Msg::R => self.rcvd_response(&msg).await,
             Msg::E => self.rcvd_error(&msg).await,
             _ => Err(EPROTO)?,
@@ -159,31 +129,31 @@ impl PeerTask {
     }
 
     /// Handle received query message
-    /// 
+    ///
     /// Checks the peer ID and throws an error on mismatch.
-    async fn rcvd_query(&mut self, msg: &Value<'_>, sock: &UdpSocket) -> Result<(), Error> {
+    async fn rcvd_query(&mut self, msg: &Value<'_>) -> Result<(), Error> {
         let t = msg.get::<&[u8]>(Msg::T).ok_or(EPROTO)?;
         let q = msg.get::<&str>(Msg::Q).ok_or(EPROTO)?;
         let a = msg.get::<&Value<'_>>(Msg::A).ok_or(EPROTO)?;
         let pid = a.get::<Id>(Msg::ID).ok_or(Error::PeerIdMissing)?;
         check(pid == self.pinf.id).ok_or(Error::PeerIdMismatch)?;
         match q {
-            Msg::PING => self.rcvd_query_ping(t, sock).await,
-            Msg::FIND_NODE => self.rcvd_query_find_node(msg, t, sock).await,
-            Msg::GET_PEERS => self.rcvd_query_get_peers(msg, t, sock).await,
-            Msg::ANNOUNCE_PEER => self.rcvd_query_announce_peer(t, sock).await,
-            _ => self.send(&Msg::error_204(t).encode(), sock).await,
+            Msg::PING => self.rcvd_query_ping(t).await,
+            Msg::FIND_NODE => self.rcvd_query_find_node(msg, t).await,
+            Msg::GET_PEERS => self.rcvd_query_get_peers(msg, t).await,
+            Msg::ANNOUNCE_PEER => self.rcvd_query_announce_peer(t).await,
+            _ => self.send(&Msg::error_204(t).encode()).await,
         }
     }
 
     /// Handle received ping query
-    async fn rcvd_query_ping(&mut self, t: &[u8], sock: &UdpSocket) -> Result<(), Error> {
+    async fn rcvd_query_ping(&mut self, t: &[u8]) -> Result<(), Error> {
         let r = Msg::ping_response(t, &self.ninf.id).encode();
-        self.send(&r, sock).await
+        self.send(&r).await
     }
 
     /// Handle received find_node query
-    async fn rcvd_query_find_node(&mut self, msg: &Value<'_>, t: &[u8], sock: &UdpSocket) -> Result<(), Error> {
+    async fn rcvd_query_find_node(&mut self, msg: &Value<'_>, t: &[u8]) -> Result<(), Error> {
         let t = t.to_vec();
         let a = msg.get::<&Value<'_>>(Msg::A).ok_or(EPROTO)?;
         let target = a.get::<Id>(Msg::TARGET).ok_or(EPROTO)?;
@@ -197,13 +167,13 @@ impl PeerTask {
             });
         } else {
             let m = Msg::find_node_response(&t, &id, &[]);
-            self.send(&m.encode(), sock).await?;
+            self.send(&m.encode()).await?;
         }
         Ok(())
     }
 
     /// Handle received get_peers query
-    async fn rcvd_query_get_peers(&mut self, msg: &Value<'_>, t: &[u8], sock: &UdpSocket) -> Result<(), Error> {
+    async fn rcvd_query_get_peers(&mut self, msg: &Value<'_>, t: &[u8]) -> Result<(), Error> {
         let t = t.to_vec();
         let a = msg.get::<&Value<'_>>(Msg::A).ok_or(EPROTO)?;
         let info_hash = a.get::<Id>(Msg::INFO_HASH).ok_or(EPROTO)?;
@@ -217,15 +187,15 @@ impl PeerTask {
             });
         } else {
             let m = Msg::get_peers_response(&t, &id, "FIXME".as_bytes(), &[]);
-            self.send(&m.encode(), sock).await?;
+            self.send(&m.encode()).await?;
         }
         Ok(())
     }
 
     /// Handle received announce_peer query
-    async fn rcvd_query_announce_peer(&mut self, t: &[u8], sock: &UdpSocket) -> Result<(), Error> {
+    async fn rcvd_query_announce_peer(&mut self, t: &[u8]) -> Result<(), Error> {
         let msg = Msg::announce_peer_response(&t, &self.ninf.id).encode();
-        self.send(&msg, sock).await
+        self.send(&msg).await
     }
 
     /// Handle received response message
@@ -284,40 +254,39 @@ impl PeerTask {
     }
 
     /// Execute outgoing command
-    async fn exec(&mut self, cmd: PeerCmd, sock: &UdpSocket) -> Result<(), Error> {
+    async fn exec(&mut self, cmd: PeerCmd) -> Result<(), Error> {
         match cmd {
-            PeerCmd::Ping(cmd) => self.exec_ping(cmd, sock).await,
-            PeerCmd::FindNode(cmd) => self.exec_find_node(cmd, sock).await,
+            PeerCmd::Ping(cmd) => self.exec_ping(cmd).await,
+            PeerCmd::FindNode(cmd) => self.exec_find_node(cmd).await,
         }
     }
 
     /// Execute outgoing ping command
-    async fn exec_ping(&mut self, cmd: CmdPing, sock: &UdpSocket) -> Result<(), Error> {
+    async fn exec_ping(&mut self, cmd: CmdPing) -> Result<(), Error> {
         let tid = self.trxs.start(cmd).to_be_bytes();
         let msg = Msg::ping_query(&tid, &self.ninf.id);
         let buf = msg.encode();
-        self.send(&buf, sock).await
+        self.send(&buf).await
     }
 
     /// Execute outgoing find_node command
-    async fn exec_find_node(&mut self, cmd: CmdFindNode, sock: &UdpSocket) -> Result<(), Error> {
+    async fn exec_find_node(&mut self, cmd: CmdFindNode) -> Result<(), Error> {
         let tgt = cmd.target;
         let tid = self.trxs.start(cmd).to_be_bytes();
         let msg = Msg::find_node_query(&tid, &self.ninf.id, &tgt);
         let buf = msg.encode();
-        self.send(&buf, sock).await
+        self.send(&buf).await
     }
 
     /// Send message on the UDP socket
     ///
-    /// The ping timer is reset after sending.
-    async fn send(&mut self, buf: &[u8], sock: &UdpSocket) -> Result<(), Error> {
-        sock.send(buf).await.map_err(Error::Socket)?;
+    /// The ping timer is reset and the bytes sent are accounted for after sending.
+    async fn send(&mut self, buf: &[u8]) -> Result<(), Error> {
+        self.ping.reset();
+        self.sock.send(buf).await.map_err(Error::Socket)?;
         self.stat.send_modify(|s| {
-            s.add_tx_packets(1);
             s.add_tx_bytes(buf.len() as u64);
         });
-        self.ping.reset();
         Ok(())
     }
 
@@ -334,22 +303,17 @@ impl PeerTask {
 
     /// Set the peer status to [Status::Good], clear any error and reset backoff
     fn set_good(&mut self) {
-        self.boff.reset();
         self.stat.send_modify(|s| {
             s.status = Status::Good;
-            s.error = None
+            s.rx_last = Some(Instant::now());
+            s.error = None;
         });
     }
 
     /// Set the peer status to [Status::Miss] (only if not already [Status::Miss] or worse)
     fn set_miss(&self) {
-        self.stat.send_if_modified(|s| {
-            if s.status < Status::Miss {
-                s.status = Status::Miss;
-                true
-            } else {
-                false
-            }
+        self.stat.send_modify(|s| {
+            s.status = s.status.max(Status::Miss);
         });
     }
 
