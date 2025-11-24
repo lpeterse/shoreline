@@ -5,6 +5,7 @@ use crate::Peers;
 use crate::peer::Peer;
 use std::net::SocketAddrV6;
 use std::{collections::BTreeMap, sync::Arc};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tokio_util::sync::DropGuard;
 
@@ -20,10 +21,10 @@ pub struct DHT {
 
 impl DHT {
     /// Create a new [Node] node with the given [NodeInfo]
-    pub fn new(id: Id, port: u16) -> Self {
+    pub fn new(id: Id, port: u16, seeds: watch::Receiver<Vec<SocketAddrV6>>) -> Self {
         let token = CancellationToken::new();
         let peers = Peers::new(token.clone());
-        let nodes = Nodes::new(id, port, peers.clone());
+        let nodes = Nodes::new(id, port, peers.clone(), seeds);
         let guard = token.drop_guard();
         Self { id, peers, nodes, guard }
     }
@@ -38,9 +39,5 @@ impl DHT {
 
     pub fn nodes(&self) -> impl std::ops::Deref<Target = BTreeMap<String, Arc<Node>>> + '_ {
         self.nodes.borrow()
-    }
-
-    pub fn seed(&self, addr: &SocketAddrV6) {
-        self.nodes.seed(addr);
     }
 }

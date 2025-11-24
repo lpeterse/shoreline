@@ -13,23 +13,23 @@ pub struct Nodes {
 }
 
 impl Nodes {
-    pub fn new(id: Id, port: u16, peers: Peers) -> Self {
+    pub fn new(id: Id, port: u16, peers: Peers, seeds: watch::Receiver<Vec<SocketAddrV6>>) -> Self {
         let nodes = watch::channel(BTreeMap::new()).0;
-        tokio::spawn(Self::run(id, port, peers.clone(), nodes.clone()));
+        tokio::spawn(Self::run(id, port, peers.clone(), nodes.clone(), seeds));
         Self { nodes }
-    }
-
-    pub fn seed(&self, addr: &SocketAddrV6) {
-        for node in self.nodes.borrow().values() {
-            node.seed(addr);
-        }
     }
 
     pub fn borrow(&self) -> impl Deref<Target = BTreeMap<String, Arc<Node>>> + '_ {
         self.nodes.borrow()
     }
 
-    async fn run(id: Id, port: u16, peers: Peers, nodes: watch::Sender<BTreeMap<String, Arc<Node>>>) {
+    async fn run(
+        id: Id,
+        port: u16,
+        peers: Peers,
+        nodes: watch::Sender<BTreeMap<String, Arc<Node>>>,
+        seeds: watch::Receiver<Vec<SocketAddrV6>>,
+    ) {
         let token = peers.ctok().clone();
         let mut netwatch = Netwatch::new();
         loop {
@@ -51,7 +51,7 @@ impl Nodes {
                         for (interface, addr) in desired {
                             if !m.contains_key(&interface) {
                                 let addr = SocketAddrV6::new(addr, port, 0, 0);
-                                if let Ok(node) = Node::new(id, interface.clone(), addr, peers.clone()) {
+                                if let Ok(node) = Node::new(id, interface.clone(), addr, peers.clone(), seeds.clone()) {
                                     m.insert(interface, node);
                                 }
                             }

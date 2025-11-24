@@ -37,7 +37,7 @@ impl MainApp {
     pub fn new(ctx: Context, rt: Runtime, dht: Arc<DHT>, mmdb: MMDB) -> Self {
         let ctx = ctx.clone();
         let task = rt.spawn(async move {
-            let mut intvl = tokio::time::interval(std::time::Duration::from_secs(1));
+            let mut intvl = tokio::time::interval(std::time::Duration::from_millis(100));
             loop {
                 intvl.tick().await;
                 ctx.request_repaint();

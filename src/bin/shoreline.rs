@@ -1,6 +1,6 @@
 use eframe::egui;
 use shoreline::app::MainApp;
-use shoreline::{config::Config, mmdb::MMDB};
+use shoreline::{config::Config, mmdb::MMDB, SEEDS};
 use shoreline_dht::DHT;
 use std::sync::Arc;
 
@@ -12,7 +12,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node: Result<(Arc<DHT>, MMDB), String> = rt.block_on(async {
         let dir = Config::dir().await.map_err(|e| e.to_string())?;
         let config = Config::load().await.map_err(|e| e.to_string())?;
-        let dht = DHT::new(config.dht.node_id, config.dht.bind_port);
+        let seeds = tokio::sync::watch::channel(
+            SEEDS.iter()
+                .filter_map(|s| s.parse().ok())
+                .collect::<Vec<_>>(),
+        ).1;
+        let dht = DHT::new(config.dht.node_id, config.dht.bind_port, seeds);
         let dht = Arc::new(dht);
         let mmdb = MMDB::new(dir.join("dbip-country.mmdb"));
         Ok((dht, mmdb))

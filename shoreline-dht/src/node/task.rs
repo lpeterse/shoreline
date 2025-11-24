@@ -26,13 +26,20 @@ pub struct Task {
     cmds: mpsc::UnboundedReceiver<Command>,
     intvl: Interval,
     peers: Peers,
+    seeds: watch::Receiver<Vec<SocketAddrV6>>,
     table: BTreeMap<usize, BTreeMap<SocketAddrV6, Arc<Link>>>,
     infos: JoinSet<Infos>,
     terms: JoinSet<Arc<Link>>,
 }
 
 impl Task {
-    pub fn spawn(node: Arc<Node>, peers: Peers, stat: watch::Sender<NodeStat>, cmds: mpsc::UnboundedReceiver<Command>) -> Result<(), Error> {
+    pub fn spawn(
+        node: Arc<Node>,
+        peers: Peers,
+        seeds: watch::Receiver<Vec<SocketAddrV6>>,
+        stat: watch::Sender<NodeStat>,
+        cmds: mpsc::UnboundedReceiver<Command>,
+    ) -> Result<(), Error> {
         let sock = socket_bound(*node.addr()).map_err(Error::Socket)?;
         let this = Self {
             node,
@@ -41,6 +48,7 @@ impl Task {
             cmds,
             intvl: interval(REFRESH_INTERVAL),
             peers,
+            seeds,
             table: BTreeMap::new(),
             infos: JoinSet::new(),
             terms: JoinSet::new(),
@@ -53,24 +61,12 @@ impl Task {
     ///
     /// This function runs until the node is shut down or an error occurs.
     async fn run(mut self: Box<Self>) {
-        self.run_seeding().await;
+        self.seed().await;
         self.run_loop().await;
 
         for bucket in self.table.into_values() {
             for link in bucket.into_values() {
                 link.token().cancel();
-            }
-        }
-    }
-
-    async fn run_seeding(&mut self) {
-        for seed in crate::SEEDS {
-            if let Ok(addrs) = tokio::net::lookup_host(seed).await {
-                for addr in addrs {
-                    if let std::net::SocketAddr::V6(addrv6) = addr {
-                        self.seed(addrv6).await;
-                    }
-                }
             }
         }
     }
@@ -90,9 +86,6 @@ impl Task {
                 }
                 Some(cmd) = self.cmds.recv() => {
                     match cmd {
-                        Command::Seed(addr) => {
-                            self.seed(addr).await;
-                        }
                         Command::FindNode(id, tx) => {
                             let infos = self.find(&id);
                             let _ = tx.send(infos);
@@ -106,6 +99,9 @@ impl Task {
                 Some(res) = self.terms.join_next() => {
                     self.remove(res.unwrap());
                 }
+                Ok(()) = self.seeds.changed() => {
+                    self.seed().await;
+                }
                 _ = self.intvl.tick() => {
                     self.refresh();
                 }
@@ -116,10 +112,13 @@ impl Task {
         }
     }
 
-    async fn seed(&mut self, addr: SocketAddrV6) {
-        let target = Id::random();
-        let buf = Msg::find_node_query(&[0], self.node.id(), &target).encode();
-        self.send(&buf, addr).await;
+    async fn seed(&mut self) {
+        let addrs = self.seeds.borrow().clone();
+        for addr in addrs.into_iter() {
+            let target = Id::random();
+            let buf = Msg::find_node_query(&[0], self.node.id(), &target).encode();
+            self.send(&buf, addr).await;
+        }
     }
 
     fn suggest(&mut self, info: Info) {
@@ -231,7 +230,7 @@ impl Task {
                     infos.iter().for_each(|info| self.suggest(*info));
                 }
             }
-            _ => ()
+            _ => (),
         };
 
         if !sbuf.is_empty() {

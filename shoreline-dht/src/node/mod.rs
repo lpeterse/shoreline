@@ -28,14 +28,14 @@ pub struct Node {
 
 impl Node {
     /// Create a new [Node] node with the given [Info]
-    pub fn new(id: Id, name: String, addr: SocketAddrV6, peers: Peers) -> Result<Arc<Self>, Error> {
+    pub fn new(id: Id, name: String, addr: SocketAddrV6, peers: Peers, seeds: watch::Receiver<Vec<SocketAddrV6>>) -> Result<Arc<Self>, Error> {
         let (stat_, stat) = watch::channel(NodeStat::default());
         let cmds = mpsc::unbounded_channel();
         let cmdr = cmds.1;
         let cmds = cmds.0;
         let ctok = peers.ctok().child_token();
         let this = Arc::new(Self { id, name, addr, cmds, stat, token: ctok });
-        Task::spawn(this.clone(), peers, stat_, cmdr)?;
+        Task::spawn(this.clone(), peers, seeds, stat_, cmdr)?;
         Ok(this)
     }
 
@@ -63,10 +63,10 @@ impl Node {
         self.stat.borrow().clone()
     }
 
-    ///
-    pub fn seed(&self, addr: &SocketAddrV6){
-        let _ = self.cmds.send(Command::Seed((*addr).into()));
-    }
+    // ///
+    // pub fn seed(&self, addr: &SocketAddrV6){
+    //     let _ = self.cmds.send(Command::Seed((*addr).into()));
+    // }
 
     /// Suggest to connect to a [Peer] and eventually add it to the table
     ///
