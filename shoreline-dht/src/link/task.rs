@@ -7,7 +7,7 @@ use super::status::Status;
 use super::trxs::Trxs;
 use crate::constants::*;
 use crate::link::stat::Stat;
-use crate::util::{check, socket, socket_connected};
+use crate::util::{check, interval_skip_at, socket, socket_connected};
 use crate::{Node, Peer};
 use bencode_minimal::Value;
 use std::net::SocketAddrV6;
@@ -16,7 +16,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tokio::time::{Instant, Interval, interval_at};
+use tokio::time::{Instant, Interval};
 use tokio_util::sync::CancellationToken;
 
 const EPROTO: Error = Error::ProtocolViolation;
@@ -49,7 +49,7 @@ impl Task {
             peer,
             addr,
             sock: socket(),
-            ping: interval_at(Instant::now() + PING_STARTUP_DELAY, PING_INTERVAL),
+            ping: interval_skip_at(Instant::now() + PING_STARTUP_DELAY, PING_INTERVAL),
             trxs: Trxs::new(&stat),
             qrys: JoinSet::new(),
             cmds,

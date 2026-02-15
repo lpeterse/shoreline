@@ -7,6 +7,7 @@ use crate::Error;
 use crate::Node;
 use crate::Peers;
 use crate::constants::*;
+use crate::util::interval_skip;
 use crate::util::socket_bound;
 use bencode_minimal::Value;
 use std::collections::BTreeMap;
@@ -17,7 +18,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tokio::time::{Interval, interval};
+use tokio::time::Interval;
 
 pub struct Task {
     node: Arc<Node>,
@@ -46,7 +47,7 @@ impl Task {
             sock,
             stat,
             cmds,
-            intvl: interval(REFRESH_INTERVAL),
+            intvl: interval_skip(REFRESH_INTERVAL),
             peers,
             seeds,
             table: BTreeMap::new(),

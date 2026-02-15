@@ -1,19 +1,20 @@
-use crate::identity::IdentityProvider;
+use crate::{config::IdentityConfig, identity::IdentityProvider};
 use eframe::egui;
 use egui::*;
 use egui_extras::{Column, TableBuilder};
+use tokio::{runtime::Runtime, sync::watch};
 
-pub struct IdentityApp {
+pub struct IdApp {
     provider: IdentityProvider,
 }
 
-impl IdentityApp {
-    pub fn new() -> Self {
+impl IdApp {
+    pub fn new(rt: &Runtime, config: watch::Receiver<Option<IdentityConfig>>) -> Self {
         Self { provider: IdentityProvider::new() }
     }
 }
 
-impl eframe::App for IdentityApp {
+impl eframe::App for IdApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(_identity) = self.provider.get() {
             CentralPanel::default().show(ctx, |ui| {

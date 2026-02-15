@@ -1,8 +1,21 @@
 use std::net::SocketAddrV6;
 use tokio::net::UdpSocket;
+use tokio::time::{Duration, Interval};
 
 pub fn check(b: bool) -> Option<()> {
     if b { Some(()) } else { None }
+}
+
+pub fn interval_skip(duration: Duration) -> Interval {
+    let mut intvl = tokio::time::interval(duration);
+    intvl.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    intvl
+}
+
+pub fn interval_skip_at(start: tokio::time::Instant, duration: Duration) -> Interval {
+    let mut intvl = tokio::time::interval_at(start, duration);
+    intvl.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    intvl
 }
 
 pub fn socket() -> UdpSocket {

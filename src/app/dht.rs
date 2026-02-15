@@ -1,4 +1,4 @@
-use crate::mmdb::MMDB;
+use crate::dht::DhtCtrl;
 use eframe::egui;
 use egui::*;
 use egui_extras::{Column, TableBuilder};
@@ -7,8 +7,7 @@ use shoreline_dht::{DHT, Link, Node, Status, TIMEOUT_INIT, TIMEOUT_TOTAL};
 use std::sync::Arc;
 
 pub struct DhtApp {
-    dht: Arc<DHT>,
-    mmdb: MMDB,
+    dht_ctrl: DhtCtrl,
     interface: Option<String>,
 }
 
@@ -21,16 +20,22 @@ impl DhtApp {
     pub const TEXT_ALL_INTERFACES: &'static str = "All";
     pub const TEXT_NO_INTERFACES: &'static str = "No suitable interfaces/addresses found";
 
-    pub fn new(dht: Arc<DHT>, mmdb: MMDB) -> Self {
-        Self { dht, mmdb, interface: None }
+    pub fn new(dht: DhtCtrl) -> Self {
+        Self { dht_ctrl: dht, interface: None }
     }
 
+    // pub fn is_active(&self) -> bool {
+    //     self.dht.borrow().is_some()
+    // }
+
     pub fn paint(&mut self, ctx: &egui::Context) {
-        if self.dht.nodes().is_empty() {
-            self.paint_empty(ctx);
-        } else {
-            self.paint_top_panel(ctx);
-            self.paint_central_panel(ctx);
+        if let Some(dht) = self.dht_ctrl.dht() {
+            if dht.nodes().is_empty() {
+                self.paint_empty(ctx);
+            } else {
+                self.paint_top_panel(ctx, &dht);
+                self.paint_central_panel(ctx, &dht);
+            }
         }
     }
 
@@ -44,18 +49,17 @@ impl DhtApp {
         });
     }
 
-    pub fn paint_top_panel(&mut self, ctx: &egui::Context) {
+    pub fn paint_top_panel(&mut self, ctx: &egui::Context, dht: &DHT) {
         TopBottomPanel::top(Self::ID_TOP).show(ctx, |ui| {
             ui.add_space(3.0);
             ui.horizontal(|ui| {
-                let count = self.dht.peers().values().count();
+                let count = dht.peers().values().count();
                 let label = format!("{} ({})", Self::TEXT_ALL_INTERFACES, count);
                 if ui.selectable_label(self.interface.is_none(), label).clicked() {
                     self.interface = None;
                 }
-                for interface in self.dht.nodes().keys() {
-                    let count = self
-                        .dht
+                for interface in dht.nodes().keys() {
+                    let count = dht
                         .peers()
                         .values()
                         .map(|p| p.links().values().filter(|l| l.node().name() == interface).count())
@@ -71,12 +75,12 @@ impl DhtApp {
         });
     }
 
-    pub fn paint_central_panel(&mut self, ctx: &egui::Context) {
+    pub fn paint_central_panel(&mut self, ctx: &egui::Context, dht: &DHT) {
         let frame = Frame::default().inner_margin(Margin::ZERO).fill(ctx.style().visuals.window_fill());
         CentralPanel::default().frame(frame).show(ctx, |ui| {
             let peers = {
-                let mut peers = self.dht.peers().values().cloned().collect::<Vec<_>>();
-                peers.sort_by(|a, b| b.id().similarity(self.dht.id()).cmp(&a.id().similarity(self.dht.id())));
+                let mut peers = dht.peers().values().cloned().collect::<Vec<_>>();
+                peers.sort_by(|a, b| b.id().similarity(dht.id()).cmp(&a.id().similarity(dht.id())));
                 peers
             };
 
@@ -155,7 +159,7 @@ impl DhtApp {
                     let filter_link =
                         |l: &&Arc<Link>| self.interface.is_none() || self.interface.as_deref() == Some(l.node().name());
 
-                    for (i, node) in self.dht.nodes().values().filter(filter_node).enumerate() {
+                    for (i, node) in dht.nodes().values().filter(filter_node).enumerate() {
                         let stat = node.stat();
                         body.row(Self::HEIGHT_ROW, |mut row| {
                             row.col(|ui| {
@@ -165,13 +169,13 @@ impl DhtApp {
                                 } else {
                                     Some(Color32::DARK_GRAY.gamma_multiply(0.5).additive())
                                 };
-                                ui.label(RichText::new(self.dht.id().to_string()).monospace());
+                                ui.label(RichText::new(dht.id().to_string()).monospace());
                                 ui.add_space(0.0);
                             });
                             row.col(|__| {});
                             row.col(|ui| {
                                 ui.with_layout(center, |ui| {
-                                    ui.label(self.mmdb.lookup_iso(*node.addr().ip()).unwrap_or_default());
+                                    // ui.label(self.mmdb.lookup_iso(*node.addr().ip()).unwrap_or_default());
                                 });
                             });
                             row.col(|__| {});
@@ -239,21 +243,23 @@ impl DhtApp {
                                 });
                                 row.col(|ui| {
                                     ui.with_layout(center, |ui| {
-                                        ui.label(link.peer().id().distance(self.dht.id()).to_string());
+                                        ui.label(link.peer().id().distance(dht.id()).to_string());
                                     });
                                 });
                                 row.col(|ui| {
                                     ui.with_layout(center, |ui| {
-                                        ui.label(self.mmdb.lookup_iso(*link.addr().ip()).unwrap_or_default());
+                                        // ui.label(self.mmdb.lookup_iso(*link.addr().ip()).unwrap_or_default());
                                     });
                                 });
                                 row.col(|ui| {
                                     ui.with_layout(right, |ui| {
-                                        ui.label(if matches!(stat.status, Status::Init | Status::Fail | Status::Term) {
-                                            stat.rx_last.elapsed().as_secs().to_string() + " s"
-                                        } else {
-                                            stat.rtt.map(|x| format!("{} ms", x.as_millis())).unwrap_or_default()
-                                        });
+                                        ui.label(
+                                            if matches!(stat.status, Status::Init | Status::Fail | Status::Term) {
+                                                stat.rx_last.elapsed().as_secs().to_string() + " s"
+                                            } else {
+                                                stat.rtt.map(|x| format!("{} ms", x.as_millis())).unwrap_or_default()
+                                            },
+                                        );
                                     });
                                 });
                                 row.col(|ui| {

@@ -7,7 +7,7 @@ pub struct MMDB {
 
 impl MMDB {
     pub fn new<P: AsRef<Path>>(path: P) -> Self {
-        let db = maxminddb::Reader::open_mmap(&path).ok();
+        let db = unsafe {maxminddb::Reader::open_mmap(&path) }.ok();
         if db.is_none() {
             log::warn!("Could not open MMDB at path: {}", path.as_ref().display());
         }
@@ -16,8 +16,9 @@ impl MMDB {
 
     pub fn lookup_iso<IP: Into<IpAddr>>(&self, ip: IP) -> Option<String> {
         let db = self.db.as_ref()?;
-        let country = db.lookup::<geoip2::Country>(ip.into()).ok().flatten()?;
-        country.country.and_then(|c| c.iso_code.map(|s| s.to_string()))
+        let result = db.lookup(ip.into()).ok()?;
+        let country = result.decode::<geoip2::Country>().ok()??;
+        country.country.iso_code.map(|s| s.to_string())
     }
 
     pub fn lookup_flag<IP: Into<IpAddr>>(&self, ip: IP) -> Option<String> {

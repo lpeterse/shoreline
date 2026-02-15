@@ -10,20 +10,23 @@ license = "MIT"
 
 [dependencies]
 bencode-minimal = { version = "0.1" }
-eframe = { version = "0.33.2", features = ["default"] }
-egui = { version = "0.33.2" }
-egui_extras = { version = "0.33.2" }
-env_logger = { version = "0.11" }
+eframe = { version = "0.33.3", features = ["default"] }
+egui = { version = "0.33.3" }
+egui_extras = { version = "0.33.3" }
+env_logger = { version = "0.11.9" }
 human_bytes = { version = "0.4.3" }
-image = { version = "0.25", default-features = false, features = ["png"] }
-log = { version = "0.4" }
-maxminddb = { version = "0.26", features = ["mmap"] }
-rand = { version = "0.9" }
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+log = { version = "0.4.29" }
+maxminddb = { version = "0.27.2", features = ["mmap"] }
+rand = { version = "0.10.0", features = ["std", "sys_rng"] }
 serde = { version = "1.0", features = ["derive"] }
 shoreline-dht = { path = "./shoreline-dht" }
-socket2 = { version = "0.6", features = ["all"] }
-tokio = { version = "1.48", features = ["full"] }
+socket2 = { version = "0.6.2", features = ["all"] }
+tokio = { version = "1.49.0", features = ["full"] }
+tokio-util = { version = "0.7.18", features = ["full"] }
 toml = { version = "0.9", features = ["preserve_order"] }
+ed25519-dalek = { version = "3.0.0-pre.6", features = ["rand_core", "serde", "pkcs8", "pem"] }
+pem-rfc7468 = { version = "1.0.0-rc.3" }
 
 [profile.release]
 lto = true

@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
-use tokio::time::{Duration, interval};
+use crate::util::interval_skip;
 use std::ops::Deref;
 
 #[derive(Debug, Clone)]
@@ -18,7 +19,7 @@ impl Netwatch {
     pub fn new() -> Self {
         let (list_, list) = watch::channel(BTreeMap::new());
         let task = tokio::task::spawn(async move {
-            let mut interval = interval(Self::INTERVAL);
+            let mut interval = interval_skip(Self::INTERVAL);
             let list = list_;
             loop {
                 tokio::select! {

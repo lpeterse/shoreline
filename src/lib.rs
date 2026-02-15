@@ -2,7 +2,10 @@ pub mod config;
 pub mod util;
 pub mod mmdb;
 pub mod app;
+pub mod dht;
 pub mod identity;
+
+pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 pub const SEEDS: &[&str] = &[
     "[2001:41d0:203:4cca:5::]:6881", // dht.transmissionbt.com IPv6
