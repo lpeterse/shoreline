@@ -4,7 +4,7 @@
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::Builder::new().filter_level(log::LevelFilter::Info).init();
+    // env_logger::Builder::new().filter_level(log::LevelFilter::Info).init();
 
     // let seeds = watch::channel(
     //     SEEDS.iter()

@@ -1,5 +1,7 @@
-mod config;
-mod provider;
+mod model;
+mod ctrl;
+mod view;
 
-pub use config::*;
-pub use provider::*;
+pub use model::*;
+pub use ctrl::*;
+pub use view::*;

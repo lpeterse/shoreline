@@ -3,7 +3,7 @@ use shoreline::Error;
 use shoreline::app::MainApp;
 
 fn main() -> Result<(), Error> {
-    env_logger::Builder::new().filter_level(log::LevelFilter::Info).init();
+    egui_logger::builder().init()?;
 
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let mut viewport = egui::ViewportBuilder::default().with_inner_size(MainApp::SIZE);

@@ -3,15 +3,14 @@ use eframe::egui;
 use egui::*;
 use egui_extras::{Column, TableBuilder};
 use human_bytes::human_bytes;
-use shoreline_dht::{DHT, Link, Node, Status, TIMEOUT_INIT, TIMEOUT_TOTAL};
+use shoreline_dht::{Link, Node, Status, TIMEOUT_INIT, TIMEOUT_TOTAL};
 use std::sync::Arc;
 
-pub struct DhtApp {
-    dht_ctrl: DhtCtrl,
+pub struct DhtView {
     interface: Option<String>,
 }
 
-impl DhtApp {
+impl DhtView {
     pub const ID_TOP: &'static str = "submenu";
 
     pub const HEIGHT_ROW: f32 = 18.0;
@@ -20,37 +19,12 @@ impl DhtApp {
     pub const TEXT_ALL_INTERFACES: &'static str = "All";
     pub const TEXT_NO_INTERFACES: &'static str = "No suitable interfaces/addresses found";
 
-    pub fn new(dht: DhtCtrl) -> Self {
-        Self { dht_ctrl: dht, interface: None }
+    pub fn new() -> Self {
+        Self { interface: None }
     }
 
-    // pub fn is_active(&self) -> bool {
-    //     self.dht.borrow().is_some()
-    // }
-
-    pub fn paint(&mut self, ctx: &egui::Context) {
-        if let Some(dht) = self.dht_ctrl.dht() {
-            if dht.nodes().is_empty() {
-                self.paint_empty(ctx);
-            } else {
-                self.paint_top_panel(ctx, &dht);
-                self.paint_central_panel(ctx, &dht);
-            }
-        }
-    }
-
-    pub fn paint_empty(&mut self, ctx: &egui::Context) {
-        self.interface = None;
-        CentralPanel::default().show(ctx, |ui| {
-            ui.centered_and_justified(|ui| {
-                let text = RichText::new(Self::TEXT_NO_INTERFACES).color(Color32::LIGHT_GRAY).heading();
-                ui.add(Label::new(text));
-            });
-        });
-    }
-
-    pub fn paint_top_panel(&mut self, ctx: &egui::Context, dht: &DHT) {
-        TopBottomPanel::top(Self::ID_TOP).show(ctx, |ui| {
+    pub fn show_top(&mut self, ui: &mut egui::Ui, dht: &DhtCtrl) {
+        if let Some(dht) = dht.dht() {
             ui.add_space(3.0);
             ui.horizontal(|ui| {
                 let count = dht.peers().values().count();
@@ -72,12 +46,11 @@ impl DhtApp {
                 }
             });
             ui.add_space(1.0);
-        });
+        }
     }
 
-    pub fn paint_central_panel(&mut self, ctx: &egui::Context, dht: &DHT) {
-        let frame = Frame::default().inner_margin(Margin::ZERO).fill(ctx.style().visuals.window_fill());
-        CentralPanel::default().frame(frame).show(ctx, |ui| {
+    pub fn show_central(&mut self, ui: &mut egui::Ui, dht: &DhtCtrl) {
+        if let Some(dht) = dht.dht() {
             let peers = {
                 let mut peers = dht.peers().values().cloned().collect::<Vec<_>>();
                 peers.sort_by(|a, b| b.id().similarity(dht.id()).cmp(&a.id().similarity(dht.id())));
@@ -289,12 +262,6 @@ impl DhtApp {
                         }
                     }
                 });
-        });
-    }
-}
-
-impl eframe::App for DhtApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.paint(ctx);
+        }
     }
 }

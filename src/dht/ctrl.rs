@@ -1,6 +1,5 @@
-use std::{ops::Deref, sync::Arc};
-
 use shoreline_dht::DHT;
+use std::{ops::Deref, sync::Arc};
 use tokio::{runtime::Runtime, sync::watch};
 
 use crate::config::{ConfigCtrl, ConfigState};
@@ -88,7 +87,6 @@ impl DhtCtrlTask {
                 );
             }
         }
-        println!("Resolved seeds: {:?}", addrs);
         addrs
     }
 }
