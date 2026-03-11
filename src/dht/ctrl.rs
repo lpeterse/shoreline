@@ -58,7 +58,10 @@ impl DhtCtrlTask {
                             let dht = DHT::new(self.current_id, self.current_port, self.current_seeds.subscribe());
                             let _ = self.dht.send(Some(Arc::new(dht)));
                         }
-                        let seeds = Self::resolve(&config.dht.bootstrap_nodes).await;
+                        let mut seeds = vec![];
+                        for seed in config.dht.seeds {
+                            let _ = seed.resolve().await.map(|a| seeds.push(a)).ok();
+                        }
                         if self.current_seeds.borrow().deref() != &seeds {
                             let _ = self.current_seeds.send(seeds);
                         }

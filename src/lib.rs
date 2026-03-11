@@ -2,6 +2,7 @@ pub mod config;
 pub mod util;
 pub mod mmdb;
 pub mod app;
+pub mod model;
 pub mod dht;
 pub mod identity;
 

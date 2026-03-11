@@ -1,18 +1,22 @@
-use crate::{app::MyUiExtensions as _, config::{AppConfig, ConfigCtrl, ConfigState}};
+use crate::{
+    app::MyUiExtensions as _,
+    config::{AppConfig, ConfigCtrl, ConfigState}, model::HostAddress,
+};
 use eframe::egui;
 use egui::*;
 
 pub struct ConfigView {
     pub state: ConfigState,
-    pub copy: Option<AppConfig>,
+    pub editing: Option<AppConfig>,
 }
 
 impl ConfigView {
+    const GRID_SPACING: [f32; 2] = [20.0, 10.0];
+    const COL_0_MIN_WIDTH: f32 = 120.0;
+    const COL_1_MIN_WIDTH: f32 = 250.0;
+
     pub fn new() -> Self {
-        Self {
-                state: ConfigState::Loading,
-            copy: None,
-        }
+        Self { state: ConfigState::Loading, editing: None }
     }
 
     pub fn update(&mut self, ctrl: &mut ConfigCtrl) {
@@ -23,38 +27,36 @@ impl ConfigView {
 
     pub fn show_top(&mut self, ui: &mut egui::Ui, ctrl: &mut ConfigCtrl) {
         ui.add_space(3.0);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-            match &self.state {
-                ConfigState::Result(Err(_)) => {
-                    if ui.danger_button("Overwrite with default configuration").clicked() {
-                        ctrl.reset();
-                    }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| match &self.state {
+            ConfigState::Result(Err(_)) => {
+                if ui.danger_button("Overwrite with default configuration").clicked() {
+                    ctrl.reset();
                 }
-                ConfigState::Result(Ok(None)) => {
-                    if ui.primary_button("Create default configuration").clicked() {
-                        ctrl.reset();
-                    }
-                }
-                ConfigState::Result(Ok(Some(config))) => {
-                    if let Some(copy) = &self.copy {
-                        if ui.primary_button("Save").clicked() {
-                            ctrl.set(copy.clone());
-                            self.copy = None;
-                        }
-                        if ui.add(Button::new("Cancel")).clicked() {
-                            self.copy = None;
-                        }
-                        if ui.add(Button::new("Reset to defaults")).clicked() {
-                            self.copy = Some(AppConfig::default());
-                        }
-                    } else {
-                        if ui.primary_button("Edit").clicked() {
-                            self.copy = Some(config.clone());
-                        }
-                    }
-                }
-                _ => ()
             }
+            ConfigState::Result(Ok(None)) => {
+                if ui.primary_button("Create default configuration").clicked() {
+                    ctrl.reset();
+                }
+            }
+            ConfigState::Result(Ok(Some(config))) => {
+                if let Some(copy) = &self.editing {
+                    if ui.primary_button("Save").clicked() {
+                        ctrl.set(copy.clone());
+                        self.editing = None;
+                    }
+                    if ui.add(Button::new("Cancel")).clicked() {
+                        self.editing = None;
+                    }
+                    if ui.add(Button::new("Reset to defaults")).clicked() {
+                        self.editing = Some(AppConfig::default());
+                    }
+                } else {
+                    if ui.primary_button("Edit").clicked() {
+                        self.editing = Some(config.clone());
+                    }
+                }
+            }
+            _ => (),
         });
         ui.add_space(1.0);
     }
@@ -66,22 +68,24 @@ impl ConfigView {
                     ui.add(egui::Spinner::new());
                     ui.label("Loading configuration...");
                 });
-            },
+            }
             ConfigState::Result(Err(e)) => {
                 ui.vertical(|ui: &mut Ui| {
-                    ui.add(Label::new(RichText::new("Failed to load configuration: ").color(Color32::LIGHT_RED)).wrap());
+                    ui.add(
+                        Label::new(RichText::new("Failed to load configuration: ").color(Color32::LIGHT_RED)).wrap(),
+                    );
                     ui.add_space(20.);
                     ui.add(Label::new(RichText::new(e.to_string()).monospace().color(Color32::LIGHT_RED)).wrap());
                     ui.add_space(20.);
                 });
-            },
+            }
             ConfigState::Result(Ok(None)) => {
                 ui.centered_and_justified(|ui| {
                     ui.add(Label::new(RichText::new("No configuration found.").color(Color32::LIGHT_YELLOW)).wrap());
                 });
-            },
+            }
             ConfigState::Result(Ok(Some(config))) => {
-                if let Some(copy) = &mut self.copy {
+                if let Some(copy) = &mut self.editing {
                     Self::show_config(ui, copy, true);
                 } else {
                     Self::show_config(ui, config, false);
@@ -91,22 +95,18 @@ impl ConfigView {
     }
 
     pub fn show_config(ui: &mut egui::Ui, config: &mut AppConfig, edit: bool) {
-        const GRID_SPACING: [f32; 2] = [20.0,10.0];
-        const COL_0_MIN_WIDTH: f32 = 120.0;
-        const COL_1_MIN_WIDTH: f32 = 250.0;
-
         CollapsingHeader::new("Identity").default_open(true).show(ui, |ui| {
-            egui::Grid::new("Identity").num_columns(3).spacing(GRID_SPACING).show(ui, |ui| {
+            egui::Grid::new("Identity").num_columns(3).spacing(Self::GRID_SPACING).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.set_min_width(COL_0_MIN_WIDTH);
+                    ui.set_min_width(Self::COL_0_MIN_WIDTH);
                     ui.label("Name");
                 });
                 ui.horizontal(|ui| {
-                    ui.set_min_width(COL_1_MIN_WIDTH);
+                    ui.set_min_width(Self::COL_1_MIN_WIDTH);
                     if edit {
                         ui.add(egui::TextEdit::singleline(&mut config.identity.name));
                     } else {
-                        ui.label(config.identity.name.clone());
+                        ui.label(RichText::new(config.identity.name.clone()).strong());
                     }
                 });
                 ui.end_row();
@@ -121,14 +121,42 @@ impl ConfigView {
             });
         });
 
+        CollapsingHeader::new("Peers").default_open(true).show(ui, |ui| {
+
+            for i in config.peers.list.iter() {
+                egui::Grid::new(format!("Peer_{}", i.name)).num_columns(3).spacing(Self::GRID_SPACING).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.set_min_width(Self::COL_0_MIN_WIDTH);
+                        ui.label("Name");
+                    });
+                    ui.label(RichText::new(i.name.clone()).strong());
+                    ui.end_row();
+
+                    ui.label("Public Key");
+                    ui.label(RichText::new(i.pubkey.to_string()).monospace());
+                    ui.end_row();
+
+                    ui.label("Addresses");
+                    ui.vertical(|ui| {
+                        for addr in i.addresses.iter() {
+                            ui.label(RichText::new(addr.to_string()).monospace());
+                            ui.end_row();
+                        }
+                    });
+                    ui.end_row();
+                });
+                ui.separator();
+            }
+        });
+
         CollapsingHeader::new("DHT").default_open(true).show(ui, |ui| {
-            egui::Grid::new("DHT").num_columns(3).spacing(GRID_SPACING).show(ui, |ui| {
+            egui::Grid::new("DHT").num_columns(3).spacing(Self::GRID_SPACING).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.set_min_width(COL_0_MIN_WIDTH);
+                    ui.set_min_width(Self::COL_0_MIN_WIDTH);
                     ui.label("Enabled");
                 });
                 ui.horizontal(|ui| {
-                    ui.set_min_width(COL_1_MIN_WIDTH);
+                    ui.set_min_width(Self::COL_1_MIN_WIDTH);
                     ui.add_enabled(edit, egui::Checkbox::new(&mut config.dht.enabled, ""));
                 });
                 ui.label("Use the BitTorrent DHT to find peers.");
@@ -145,9 +173,10 @@ impl ConfigView {
 
                 ui.label("Bootstrap Nodes");
                 if edit {
-                    addable_list(ui, &mut config.dht.bootstrap_nodes);
+                    addable_list(ui, &mut config.dht.seeds);
                 } else {
-                    ui.label(RichText::new(config.dht.bootstrap_nodes.join("\n")).monospace());
+                    let seeds = config.dht.seeds.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n");
+                    ui.label(RichText::new(seeds).monospace());
                 }
                 ui.add(egui::Label::new("At least one bootstrap node is required to join the DHT. From there, you will automatically discover other nodes in the network. You can add more bootstrap nodes to improve reliability.").wrap());
                 ui.end_row();
@@ -156,7 +185,7 @@ impl ConfigView {
     }
 }
 
-pub fn addable_list(ui: &mut egui::Ui, items: &mut Vec<String>) {
+pub fn addable_list(ui: &mut egui::Ui, items: &mut Vec<HostAddress>) {
     let state_id = ui.id().with("addable_list");
 
     let num_rows = items.len() + 1; // +1 for the input row
@@ -165,41 +194,41 @@ pub fn addable_list(ui: &mut egui::Ui, items: &mut Vec<String>) {
     let total_h = (num_rows as f32 * row_height) + ((num_rows - 1) as f32 * spacing);
 
     let mut input = ui.data_mut(|d| d.get_temp::<String>(state_id).unwrap_or_default());
-    let valid = (|| {
-        let (host, port) = input.split_once(':')?;
-        host.split('.').filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphabetic() || c.is_ascii_digit() || c == '-')).count().checked_sub(1)?;
-        port.parse::<u16>().ok()?;
-        Some(())
-    })().is_some();
+    let input_valid = input.parse::<HostAddress>().ok();
 
     ui.add_sized([ui.available_width(), total_h], |ui: &mut egui::Ui| {
-        egui::Grid::new("addable_list").show(ui, |ui| {
-            let is = items.clone();
-            for i in is {
-                ui.label(RichText::new(i.clone()).monospace());
-                if ui.add(Button::new("➖")).clicked() {
-                    items.retain(|x| x != &i);
+        egui::Grid::new("addable_list")
+            .show(ui, |ui| {
+                let is = items.clone();
+                for i in is {
+                    ui.label(RichText::new(i.to_string()).monospace());
+                    if ui.add(Button::new("➖")).clicked() {
+                        items.retain(|x| x != &i);
+                    }
+                    ui.end_row();
                 }
-                ui.end_row();
-            }
 
-            let rk = if valid {
-                Some(egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter))
-            } else {
-                None
-            };
+                let rk = if input_valid.is_some() {
+                    Some(egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter))
+                } else {
+                    None
+                };
 
-            let res = ui.add(egui::TextEdit::singleline(&mut input).hint_text("example.com:6881").return_key(rk));
-            let enter = res.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let clicked = ui.add_enabled(valid, Button::new("➕")).clicked();
+                let res = ui.add(egui::TextEdit::singleline(&mut input).hint_text("example.com:6881").return_key(rk));
+                let enter = res.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let clicked = ui.add_enabled(input_valid.is_some(), Button::new("➕")).clicked();
 
-            if clicked || enter {
-                items.push(input.clone());
-                items.sort();
-                ui.data_mut(|d| d.insert_temp(state_id, String::new()));
-            } else {
+                if clicked || enter {
+                    if let Some(input_valid) = input_valid {
+                        input.clear();
+                        items.push(input_valid);
+                        items.sort();
+                    }
+                    ui.data_mut(|d| d.insert_temp(state_id, String::new()));
+                }
+
                 ui.data_mut(|d| d.insert_temp(state_id, input));
-            }
-        }).response
+            })
+            .response
     });
 }
