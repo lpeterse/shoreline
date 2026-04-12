@@ -4,7 +4,9 @@ pub mod mmdb;
 pub mod app;
 pub mod model;
 pub mod dht;
+pub mod peers;
 pub mod identity;
+pub mod socket;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 

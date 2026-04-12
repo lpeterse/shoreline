@@ -2,6 +2,7 @@ use crate::config::ConfigView;
 use crate::config::ConfigCtrl;
 use crate::dht::DhtView;
 use crate::dht::DhtCtrl;
+use crate::peers::{PeersCtrl, PeersView};
 use eframe::App;
 use eframe::egui;
 use egui::*;
@@ -42,8 +43,8 @@ impl Drop for MainApp {
 }
 
 impl App for MainApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.state.update(ctx, frame);
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.state.ui(ui, frame);
     }
 }
 
@@ -55,6 +56,9 @@ pub struct AppState {
 
     pub dht_view: DhtView,
     pub dht_ctrl: DhtCtrl,
+
+    pub peers_view: PeersView,
+    pub peers_ctrl: PeersCtrl,
 }
 
 impl AppState {
@@ -70,6 +74,8 @@ impl AppState {
     pub const TAB_CIRCLES_DISPLAY: &'static str = "Circles";
     pub const TAB_SETTINGS: &'static str = "settings";
     pub const TAB_SETTINGS_DISPLAY: &'static str = "Settings";
+    pub const TAB_PEERS: &'static str = "peers";
+    pub const TAB_PEERS_DISPLAY: &'static str = "Peers";
     pub const TAB_DHT: &'static str = "dht";
     pub const TAB_DHT_DISPLAY: &'static str = "DHT";
     pub const TAB_LOG: &'static str = "log";
@@ -83,19 +89,23 @@ impl AppState {
         let dht_view = DhtView::new();
         let dht_ctrl = DhtCtrl::new(rt, config_ctrl.clone());
 
-        Self { config_view, config_ctrl, dht_view, dht_ctrl, active_tab: Self::TAB_DEFAULT }
+        let peers_view = PeersView::new();
+        let peers_ctrl = PeersCtrl::new(rt, config_ctrl.clone());
+
+        Self { config_view, config_ctrl, dht_view, dht_ctrl, peers_view, peers_ctrl, active_tab: Self::TAB_DEFAULT }
     }
 }
 
 impl App for AppState {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.config_view.update(&mut self.config_ctrl);
+        ui.set_theme(Theme::Dark);
 
-        ctx.set_theme(Theme::Dark);
-        TopBottomPanel::top("menu").show(ctx, |ui| {
+        Panel::top("menu").show_inside(ui, |ui| {
             ui.add_space(3.0);
             ui.columns(2, |cols| {
                 cols[0].with_layout(Layout::left_to_right(Align::TOP), |ui| {
+                    ui.selectable_value(&mut self.active_tab, Self::TAB_PEERS, Self::TAB_PEERS_DISPLAY);
                     if self.dht_ctrl.dht().is_some() {
                         ui.selectable_value(&mut self.active_tab, Self::TAB_DHT, Self::TAB_DHT_DISPLAY);
                     }
@@ -109,30 +119,39 @@ impl App for AppState {
         });
 
         match self.active_tab {
+            Self::TAB_PEERS => {
+                Panel::top("top").show_inside(ui, |ui| {
+                    self.peers_view.show_top(ui, &self.peers_ctrl);
+                });
+                let frame = Frame::default().inner_margin(Margin::ZERO).fill(ui.style().visuals.window_fill());
+                CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+                    self.peers_view.show_central(ui, &self.peers_ctrl);
+                });
+            }
             Self::TAB_CONFIG => {
-                TopBottomPanel::top("top").show(ctx, |ui| {
+                Panel::top("top").show_inside(ui, |ui| {
                     self.config_view.show_top(ui, &mut self.config_ctrl)
                 });
-                CentralPanel::default().show(ctx, |ui| {
+                CentralPanel::default().show_inside(ui, |ui| {
                     self.config_view.show_center(ui, &mut self.config_ctrl)
                 });
             },
             Self::TAB_LOG => {
-                CentralPanel::default().show(ctx, |ui| {
+                CentralPanel::default().show_inside(ui, |ui| {
                     egui_logger::logger_ui().show(ui);
                 });
             }
             Self::TAB_DHT => {
-                TopBottomPanel::top("top").show(ctx, |ui| {
+                Panel::top("top").show_inside(ui, |ui| {
                     self.dht_view.show_top(ui, &self.dht_ctrl);
                 });
-                let frame = Frame::default().inner_margin(Margin::ZERO).fill(ctx.style().visuals.window_fill());
-                CentralPanel::default().frame(frame).show(ctx, |ui| {
+                let frame = Frame::default().inner_margin(Margin::ZERO).fill(ui.style().visuals.window_fill());
+                CentralPanel::default().frame(frame).show_inside(ui, |ui| {
                     self.dht_view.show_central(ui, &self.dht_ctrl);
                 });
             }
             _ => {
-                CentralPanel::default().show(ctx, |ui| {
+                CentralPanel::default().show_inside(ui, |ui| {
                     ui.centered_and_justified(|ui| {
                         let text = RichText::new("Not implemented yet").color(Color32::LIGHT_GRAY).heading();
                         ui.add(Label::new(text));
@@ -141,20 +160,15 @@ impl App for AppState {
             }
         }
 
-        TopBottomPanel::bottom("footer").show(ctx, |ui| {
+        Panel::bottom("footer").show_inside(ui, |ui| {
             ui.label(env!("CARGO_PKG_VERSION"));
         });
     }
 }
 
 pub trait MyUiExtensions {
-    /// Ein blauer Button (Bootstrap Primary)
     fn primary_button(&mut self, text: impl Into<egui::WidgetText>) -> egui::Response;
-    
-    /// Ein roter Button (Bootstrap Danger)
     fn danger_button(&mut self, text: impl Into<egui::WidgetText>) -> egui::Response;
-
-    /// Ein Outline-Button, der nur beim Hover farbig wird
     fn outline_button(&mut self, text: impl Into<egui::WidgetText>) -> egui::Response;
 }
 

@@ -75,21 +75,4 @@ impl DhtCtrlTask {
             }
         }
     }
-
-    async fn resolve(seeds: &Vec<String>) -> Vec<std::net::SocketAddrV6> {
-        let mut addrs = vec![];
-        for seed in seeds {
-            if let Ok(resolved) = tokio::net::lookup_host(seed).await {
-                addrs.append(
-                    &mut resolved
-                        .filter_map(|a| match a {
-                            std::net::SocketAddr::V6(a) => Some(a),
-                            _ => None,
-                        })
-                        .collect(),
-                );
-            }
-        }
-        addrs
-    }
 }
