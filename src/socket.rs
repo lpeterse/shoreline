@@ -102,14 +102,7 @@ impl PathTask {
         let socket = socket_connected(&addr_local, &addr_remote);
         let rbuf = vec![0u8; 1500];
         let (upstream, _) = mpsc::unbounded_channel();
-        PathTask {
-            addr_local,
-            addr_remote,
-            timings: Timings::default(),
-            rbuf,
-            upstream,
-            socket,
-        }
+        PathTask { addr_local, addr_remote, timings: Timings::new(), rbuf, upstream, socket }
     }
 
     pub async fn run(mut self, token: CancellationToken) {
@@ -140,11 +133,12 @@ impl PathTask {
             self.socket = socket_connected(&self.addr_local, &self.addr_remote);
         }
         if let Ok(socket) = &self.socket {
-            let mut buf = [0u8; 1 + 4*8];
+            let mut buf = [0u8; 1 + 4 * 8];
             let msg = self.timings.msg();
             let _ = msg.encode(&mut buf);
             if let Err(e) = socket.send(&buf).await {
                 self.socket = Err(e);
+                self.timings.reset();
             }
         }
     }
@@ -163,43 +157,76 @@ pub struct Timings {
 impl Timings {
     const IIR_RATIO: f64 = 0.9;
 
-    fn msg(&self) -> MsgTimings {
+    pub fn new() -> Self {
+        Self {
+            local_clock: Instant::now(),
+            remote_clock: Instant::now(),
+            last_delta: Duration::from_nanos(0),
+            perceived_rtt: Duration::from_nanos(0),
+            perceived_jitter: Duration::from_nanos(0),
+            reported_rtt: Duration::from_nanos(0),
+            reported_jitter: Duration::from_nanos(0),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.last_delta = Duration::from_nanos(0);
+        self.perceived_rtt = Duration::from_nanos(0);
+        self.perceived_jitter = Duration::from_nanos(0);
+        self.reported_rtt = Duration::from_nanos(0);
+        self.reported_jitter = Duration::from_nanos(0);
+    }
+
+    pub fn msg(&self) -> MsgTimings {
         MsgTimings {
             sender_time: self.local_clock.elapsed().as_nanos() as u64,
-            receiver_time: self.remote_clock.elapsed().as_nanos() as u64,
+            receiver_time: if self.last_delta.is_zero() {
+                0
+            } else {
+                self.remote_clock.elapsed().as_nanos() as u64
+            },
             perceived_rtt: self.perceived_rtt.as_nanos() as u64,
             perceived_jitter: self.perceived_jitter.as_nanos() as u64,
         }
     }
 
-    fn update(&mut self, msg: &MsgTimings) {
+    pub fn update(&mut self, msg: &MsgTimings) {
         const R: f64 = Timings::IIR_RATIO;
+
         let now = self.local_clock.elapsed();
-        // Calculate the observed jitter
         let delta = now.abs_diff(Duration::from_nanos(msg.sender_time));
-        let jitter = self.last_delta.abs_diff(delta);
-        // Calculate the observed RTT
-        let rtt = now.abs_diff(Duration::from_nanos(msg.receiver_time));
-        // Update the the fields
+
+        if !self.last_delta.is_zero() {
+            // Calculate the observed jitter
+            let jitter = self.last_delta.abs_diff(delta);
+            if self.perceived_jitter.is_zero() {
+                self.perceived_jitter = jitter;
+            } else {
+                self.perceived_jitter = self.perceived_jitter.mul_f64(R) + jitter.mul_f64(1.0 - R);
+            }
+        }
+
+        if msg.receiver_time != 0 {
+            // Calculate the observed RTT
+            let rtt = now.abs_diff(Duration::from_nanos(msg.receiver_time));
+            if self.perceived_rtt.is_zero() {
+                self.perceived_rtt = rtt;
+            } else {
+                self.perceived_rtt = self.perceived_rtt.mul_f64(R) + rtt.mul_f64(1.0 - R);
+            }
+        }
+
         self.remote_clock = Instant::now() + Duration::from_nanos(msg.sender_time);
         self.last_delta = delta;
-        self.perceived_rtt = self.perceived_rtt.mul_f64(R) + rtt.mul_f64(1.0 - R);
-        self.perceived_jitter = self.perceived_jitter.mul_f64(R) + jitter.mul_f64(1.0 - R);
         self.reported_rtt = Duration::from_nanos(msg.perceived_rtt);
         self.reported_jitter = Duration::from_nanos(msg.perceived_jitter);
-    }
-}
-
-impl Default for Timings {
-    fn default() -> Self {
-        Self { local_clock: Instant::now(), remote_clock: Instant::now(), last_delta: Duration::from_nanos(0), perceived_jitter: Duration::from_nanos(0), perceived_rtt: Duration::from_nanos(0), reported_rtt: Duration::from_nanos(0), reported_jitter: Duration::from_nanos(0) }
     }
 }
 
 pub struct MsgTimings {
     /// The time of the sender's local clock, in nanoseconds.
     ///
-    /// The clock offset is arbitrary, but constant so this value can be used to determined jitter on receiving a message.
+    /// The clock offset is arbitrary, but constant so this value can be used to determine jitter between subsequent messages.
     pub sender_time: u64,
     /// The estimated time of the receiver's clock in nanoseconds.
     ///
