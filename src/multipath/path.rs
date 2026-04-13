@@ -57,7 +57,7 @@ impl PathTask {
 
     pub async fn run(mut self, token: CancellationToken) {
         let mut interval_stats = interval(Duration::from_secs(1));
-        let mut interval_ping = interval(Duration::from_secs(30));
+        let mut interval_ping = interval(Duration::from_secs(1));
         log::info!("Starting path task for {} <-> {}", self.addr.local, self.addr.remote);
         loop {
             select! {
@@ -82,10 +82,8 @@ impl PathTask {
     async fn receive(&mut self) {
         if let Ok(socket) = &self.socket {
             if let Ok(rcvd) = socket.recv(&mut self.rbuf).await {
-                log::info!("Received {} bytes on path {} <-> {}", rcvd, self.addr.local, self.addr.remote);
                 let buf = &self.rbuf[..rcvd];
                 if let Some(msg) = MsgTimings::decode(buf) {
-                    dbg!(&msg);
                     self.timings.update(&msg);
                 }
             }
