@@ -51,27 +51,19 @@ impl PeersView {
                     ui.strong("Peer");
                 });
                 header.col(|ui| {
-                    ui.strong("Public Key");
+                    ui.strong("Local");
                 });
                 header.col(|ui| {
-                    ui.strong("Address");
-                });
-                header.col(|ui| {
-                    ui.strong("Status");
+                    ui.strong("Remote");
                 });
                 header.col(|ui| {
                     ui.with_layout(right, |ui| {
-                        ui.strong("\u{23F1}");
+                        ui.strong("\u{1F501}");
                     });
                 });
                 header.col(|ui| {
                     ui.with_layout(right, |ui| {
-                        ui.strong("\u{2b06}");
-                    });
-                });
-                header.col(|ui| {
-                    ui.with_layout(right, |ui| {
-                        ui.strong("\u{2b07}");
+                        ui.strong("\u{26A1}");
                     });
                 });
                 header.col(|ui| {
@@ -81,55 +73,50 @@ impl PeersView {
             .body(|mut body| {
                 let bg = Color32::DARK_GRAY.gamma_multiply(0.3);
                 for peer in &peers {
-                    for (i, addr) in peer.addresses.iter().enumerate() {
+                    let paths = { peer.paths.stats().borrow().paths.clone() };
+                    for (i, (addr, stats)) in paths.iter().enumerate() {
                         let dimmed = Color32::DARK_GRAY.gamma_multiply(0.5).additive();
                         body.row(Self::HEIGHT_ROW, |mut row| {
                             row.col(|ui| {
                                 paint_bg(ui, bg);
                                 ui.add_space(10.0);
                                 if i == 0 {
-                                    ui.strong(&peer.name);
+                                    ui.strong(&peer.config.name);
                                 } else {
-                                    ui.colored_label(dimmed, &peer.name);
+                                    ui.colored_label(dimmed, &peer.config.name);
                                 }
                             });
                             row.col(|ui| {
                                 paint_bg(ui, bg);
-                                let pubkey_text = RichText::new(peer.pubkey.to_string()).monospace();
-                                if i == 0 {
-                                    ui.label(pubkey_text);
-                                } else {
-                                    ui.label(pubkey_text.color(dimmed));
-                                }
+                                ui.label(format!("{}", addr.local));
                             });
                             row.col(|ui| {
                                 paint_bg(ui, bg);
-                                ui.label(format!("{}", addr));
-                            });
-                            row.col(|ui| {
-                                paint_bg(ui, bg);
-                                ui.colored_label(Color32::GRAY, "\u{2014}");
+                                ui.label(format!("{}", addr.remote));
                             });
                             row.col(|ui| {
                                 paint_bg(ui, bg);
                                 ui.with_layout(right, |ui| {
-                                    ui.colored_label(Color32::GRAY, "\u{2014}");
+                                    if stats.rtt.as_millis() > 0 {
+                                        ui.label(format!("{:.3} ms", stats.rtt.as_secs_f64() * 1000.0));
+                                    } else {
+                                        ui.colored_label(dimmed, "\u{2014}");
+                                    }
                                 });
                             });
                             row.col(|ui| {
                                 paint_bg(ui, bg);
                                 ui.with_layout(right, |ui| {
-                                    ui.colored_label(Color32::GRAY, "\u{2014}");
+                                    if stats.jitter.as_millis() > 0 {
+                                        ui.label(format!("{:.3} ms", stats.jitter.as_secs_f64() * 1000.0));
+                                    } else {
+                                        ui.colored_label(dimmed, "\u{2014}");
+                                    }
                                 });
                             });
                             row.col(|ui| {
                                 paint_bg(ui, bg);
-                                ui.with_layout(right, |ui| {
-                                    ui.colored_label(Color32::GRAY, "\u{2014}");
-                                });
-                            });
-                            row.col(|ui| {
-                                paint_bg(ui, bg);
+                                ui.label(stats.error.as_deref().unwrap_or("\u{2014}"));
                             });
                         });
                     }

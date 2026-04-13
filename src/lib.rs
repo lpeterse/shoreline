@@ -6,7 +6,7 @@ pub mod model;
 pub mod dht;
 pub mod peers;
 pub mod identity;
-pub mod socket;
+pub mod multipath;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
