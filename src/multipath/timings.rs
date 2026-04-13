@@ -3,6 +3,7 @@ use tokio::time::{Duration, Instant};
 #[derive(Debug, Clone)]
 pub struct Timings {
     pub local_clock: Instant,
+    pub remote_time: Duration,
     pub remote_clock: Instant,
     pub last_delta: Duration,
     pub perceived_rtt: Duration,
@@ -17,6 +18,7 @@ impl Timings {
     pub fn new() -> Self {
         Self {
             local_clock: Instant::now(),
+            remote_time: Duration::ZERO,
             remote_clock: Instant::now(),
             last_delta: Duration::from_nanos(0),
             perceived_rtt: Duration::from_nanos(0),
@@ -37,10 +39,12 @@ impl Timings {
     pub fn msg(&self) -> MsgTimings {
         MsgTimings {
             sender_time: self.local_clock.elapsed().as_nanos() as u64,
-            receiver_time: if self.last_delta.is_zero() {
+            receiver_time: if self.remote_time.is_zero() {
                 0
             } else {
-                self.remote_clock.elapsed().as_nanos() as u64
+                let time = self.remote_time.as_nanos() as u64;
+                let elapsed = self.remote_clock.elapsed().as_nanos() as u64;
+                time + elapsed
             },
             perceived_rtt: self.perceived_rtt.as_nanos() as u64,
             perceived_jitter: self.perceived_jitter.as_nanos() as u64,
@@ -49,6 +53,9 @@ impl Timings {
 
     pub fn update(&mut self, msg: &MsgTimings) {
         const R: f64 = Timings::IIR_RATIO;
+
+        self.remote_clock = Instant::now();
+        self.remote_time = Duration::from_nanos(msg.sender_time);
 
         let now = self.local_clock.elapsed();
         let delta = now.abs_diff(Duration::from_nanos(msg.sender_time));
@@ -79,7 +86,7 @@ impl Timings {
             }
         }
 
-        self.remote_clock = Instant::now() + Duration::from_nanos(msg.sender_time);
+
         self.last_delta = delta;
         self.reported_rtt = Duration::from_nanos(msg.perceived_rtt);
         self.reported_jitter = Duration::from_nanos(msg.perceived_jitter);
