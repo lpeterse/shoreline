@@ -93,8 +93,8 @@ impl MultiPathTask {
                     let addr = SocketAddrPair { local: *local, remote: *remote };
                     if !self.paths.contains_key(&addr) {
                         let path = Path::new(addr, self.token.child_token());
+                        stats.paths.insert(addr, path.stats().clone());
                         self.paths.insert(addr, path);
-                        stats.paths.insert(addr, PathStats::new());
                     }
                 }
             }

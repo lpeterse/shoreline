@@ -75,6 +75,7 @@ impl PeersView {
                 for peer in &peers {
                     let paths = { peer.paths.stats().borrow().paths.clone() };
                     for (i, (addr, stats)) in paths.iter().enumerate() {
+                        let stats = { stats.borrow().clone() };
                         let dimmed = Color32::DARK_GRAY.gamma_multiply(0.5).additive();
                         body.row(Self::HEIGHT_ROW, |mut row| {
                             row.col(|ui| {

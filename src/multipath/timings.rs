@@ -1,5 +1,6 @@
 use tokio::time::{Duration, Instant};
 
+#[derive(Debug, Clone)]
 pub struct Timings {
     pub local_clock: Instant,
     pub remote_clock: Instant,
@@ -52,6 +53,8 @@ impl Timings {
         let now = self.local_clock.elapsed();
         let delta = now.abs_diff(Duration::from_nanos(msg.sender_time));
 
+        dbg!(delta);
+
         if !self.last_delta.is_zero() {
             // Calculate the observed jitter
             let jitter = self.last_delta.abs_diff(delta);
@@ -80,9 +83,12 @@ impl Timings {
         self.last_delta = delta;
         self.reported_rtt = Duration::from_nanos(msg.perceived_rtt);
         self.reported_jitter = Duration::from_nanos(msg.perceived_jitter);
+
+        dbg!(self);
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct MsgTimings {
     /// The time of the sender's local clock, in nanoseconds.
     ///

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
-use std::net::SocketAddrV6;
 use tokio::time::Duration;
+use tokio::sync::watch;
 
 use crate::multipath::addr::SocketAddrPair;
 
 #[derive(Debug, Clone)]
 pub struct MultiPathStats {
-    pub paths: BTreeMap<SocketAddrPair, PathStats>,
+    pub paths: BTreeMap<SocketAddrPair, watch::Receiver<PathStats>>,
 }
 
 #[derive(Debug, Clone)]

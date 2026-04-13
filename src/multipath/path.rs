@@ -63,7 +63,7 @@ impl PathTask {
             select! {
                 _ = token.cancelled() => break,
                 _ = interval_stats.tick() => {
-                    log::info!("Path {} <-> {}: RTT = {:?}, Jitter = {:?}, Socket Error = {:?}", self.addr.local, self.addr.remote, self.timings.perceived_rtt, self.timings.perceived_jitter, self.socket.as_ref().err());
+                    //log::info!("Path {} <-> {}: RTT = {:?}, Jitter = {:?}, Socket Error = {:?}", self.addr.local, self.addr.remote, self.timings.perceived_rtt, self.timings.perceived_jitter, self.socket.as_ref().err());
                     self.stats.send_modify(|stats| {
                         stats.rtt = self.timings.perceived_rtt;
                         stats.jitter = self.timings.perceived_jitter;
@@ -82,8 +82,10 @@ impl PathTask {
     async fn receive(&mut self) {
         if let Ok(socket) = &self.socket {
             if let Ok(rcvd) = socket.recv(&mut self.rbuf).await {
+                log::info!("Received {} bytes on path {} <-> {}", rcvd, self.addr.local, self.addr.remote);
                 let buf = &self.rbuf[..rcvd];
                 if let Some(msg) = MsgTimings::decode(buf) {
+                    dbg!(&msg);
                     self.timings.update(&msg);
                 }
             }
@@ -107,7 +109,6 @@ impl PathTask {
         }
     }
 }
-
 
 fn socket_connected(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpSocket, std::io::Error> {
     use socket2::{Domain, Protocol, Socket, Type};
