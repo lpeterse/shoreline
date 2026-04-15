@@ -1,46 +1,23 @@
-use tokio::{runtime::Runtime, sync::watch};
-use crate::{config::{ConfigCtrl, ConfigState, PeerConfig}, multipath::MultiPath};
+use crate::{
+    config::{ConfigCtrl, ConfigState, PeerConfig}, dht::DhtCtrl, model::{HostAddress, PublicKey}, multipath::MultiPath
+};
+use shoreline_dht::{DHT, Netwatch};
 use std::{net::SocketAddrV6, sync::Arc};
-use shoreline_dht::Netwatch;
+use tokio::{runtime::Runtime, select, sync::watch, task::JoinHandle};
 
 #[derive(Debug, Clone)]
 pub struct PeersCtrl {
-    peers: watch::Receiver<Vec<Peer>>
+    peers: watch::Receiver<Vec<Peer>>,
 }
 
 impl PeersCtrl {
-    pub fn new(rt: &Runtime, config: ConfigCtrl) -> Self {
-        let (ps_tx, ps_rx) = watch::channel(vec![]);
-        rt.spawn(async move {
-            let cfg = config.subscribe();
-            let mut nw = Netwatch::new();
-            let mut cfg = cfg;
-            let (la_tx, la_rx) = watch::channel(vec![]);
-
-            loop {
-                tokio::select! {
-                    _ = nw.changed() => {
-                        let addrs_local = nw.list().values().map(|ip| SocketAddrV6::new(*ip, 6882, 0, 0)).collect();
-                        let _ = la_tx.send(addrs_local);
-                    }
-                    _ = cfg.changed() => {
-                        match { cfg.borrow().clone() } {
-                            ConfigState::Result(Ok(Some(config))) => {
-                                let mut peers = vec![];
-                                for pc in config.peers.list {
-                                    peers.push(Peer::new(pc, la_rx.clone()).await);
-                                }
-                                let _ = ps_tx.send(peers);
-                            }
-                            _ => {
-                                ps_tx.send(vec![]).ok();
-                            },
-                        };
-                    }
-                }
-            }
-        });
-        Self { peers: ps_rx }
+    pub fn new(rt: &Runtime, config: ConfigCtrl, dht: DhtCtrl) -> Self {
+        let cfg = config.subscribe();
+        let dht = dht.dht().clone();
+        let (peers_tx, peers_rx) = watch::channel(vec![]);
+        let task = Box::new(PeersCtrlTask::new(cfg, dht, peers_tx));
+        let _ = rt.spawn(task.run());
+        Self { peers: peers_rx }
     }
 
     pub fn peers(&self) -> Vec<Peer> {
@@ -48,24 +25,110 @@ impl PeersCtrl {
     }
 }
 
+pub struct PeersCtrlTask {
+    cfg: watch::Receiver<ConfigState>,
+    dht: watch::Receiver<Option<Arc<DHT>>>,
+    peers: watch::Sender<Vec<Peer>>,
+}
+
+impl PeersCtrlTask {
+    pub fn new(
+        cfg: watch::Receiver<ConfigState>,
+        dht: watch::Receiver<Option<Arc<DHT>>>,
+        peers: watch::Sender<Vec<Peer>>,
+    ) -> Self {
+        Self { cfg, dht, peers }
+    }
+
+    pub async fn run(mut self) {
+        let mut nw = Netwatch::new();
+        let (la_tx, la_rx) = watch::channel(vec![]);
+
+        loop {
+            select! {
+                _ = nw.changed() => {
+                    let addrs_local = nw.list().values().map(|ip| SocketAddrV6::new(*ip, 6882, 0, 0)).collect();
+                    let _ = la_tx.send(addrs_local);
+                }
+                _ = self.cfg.changed() => {
+                    match { self.cfg.borrow().clone() } {
+                        ConfigState::Result(Ok(Some(config))) => {
+                            let mut peers = vec![];
+                            for pc in config.peers.list {
+                                peers.push(Peer::new(pc, la_rx.clone(), self.dht.clone()));
+                            }
+                            let _ = self.peers.send(peers);
+                        }
+                        _ => {
+                            self.peers.send(vec![]).ok();
+                        },
+                    };
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Peer {
     pub config: PeerConfig,
-    pub remote_addrs: watch::Sender<Vec<SocketAddrV6>>,
     pub paths: Arc<MultiPath>,
+    pub task: Arc<JoinHandle<()>>,
 }
 
 impl Peer {
-    pub async fn new(config: PeerConfig, local_addrs: watch::Receiver<Vec<SocketAddrV6>>) -> Self {
+    pub fn new(
+        config: PeerConfig,
+        la_rx: watch::Receiver<Vec<SocketAddrV6>>,
+        dht: watch::Receiver<Option<Arc<DHT>>>,
+    ) -> Self {
         let (ra_tx, ra_rx) = watch::channel(vec![]);
+        let task = PeerTask::new(config.pubkey.clone(), dht, ra_tx, config.addresses.clone());
+        let task = tokio::spawn(task.run());
+        let mp = MultiPath::new(la_rx, ra_rx);
+        Self { config, paths: Arc::new(mp), task: Arc::new(task) }
+    }
+}
+
+pub struct PeerTask {
+    pubkey: PublicKey,
+    dht_rx: watch::Receiver<Option<Arc<DHT>>>,
+    ra_tx: watch::Sender<Vec<SocketAddrV6>>,
+    ra_static: Vec<HostAddress>,
+}
+
+impl PeerTask {
+    pub fn new(pubkey: PublicKey, dht_rx: watch::Receiver<Option<Arc<DHT>>>, ra_tx: watch::Sender<Vec<SocketAddrV6>>, ra_static: Vec<HostAddress>) -> Self {
+        Self { pubkey, dht_rx, ra_tx, ra_static }
+    }
+
+    pub async fn run(self) {
+        let resolved = self.resolve_static().await;
+        let _ = self.ra_tx.send(resolved);
+        let dht = self.dht_rx.borrow().clone();
+
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+
+        if let Some(dht) = dht {
+            let mut addrs_rx = dht.search_addrs(&self.pubkey.to_dht_id());
+            while let Some(mut addr) = addrs_rx.recv().await {
+                log::info!("PeerTask: found address {} from DHT search", addr);
+                addr.set_port(6882);
+                self.ra_tx.send_modify(|addrs|addrs.push(addr));
+            }
+        }
+
+        log::info!("PeerTask: DHT search ended, no more addresses will be added");
+        std::future::pending::<()>().await;
+    }
+
+    pub async fn resolve_static(&self) -> Vec<SocketAddrV6> {
         let mut addrs = vec![];
-        for addr in &config.addresses {
+        for addr in &self.ra_static {
             if let Ok(addr) = addr.resolve().await {
                 addrs.push(addr);
             }
         }
-        let _ = ra_tx.send(addrs);
-        let mp = MultiPath::new(local_addrs, ra_rx);
-        Self { config, remote_addrs: ra_tx, paths: Arc::new(mp) }
+        addrs
     }
 }

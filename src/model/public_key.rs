@@ -14,6 +14,10 @@ impl PublicKey {
         }
         Self(xs)
     }
+
+    pub fn to_dht_id(&self) -> shoreline_dht::Id {
+        shoreline_dht::Id::try_from_bytes(&self.0[..shoreline_dht::Id::BYTES]).unwrap_or(shoreline_dht::Id::UNKNOWN)
+    }
 }
 
 impl std::fmt::Display for PublicKey {

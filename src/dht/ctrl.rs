@@ -17,8 +17,8 @@ impl DhtCtrl {
         Self { dht: b }
     }
 
-    pub fn dht(&self) -> Option<Arc<DHT>> {
-        self.dht.borrow().clone()
+    pub fn dht(&self) -> &watch::Receiver<Option<Arc<DHT>>> {
+        &self.dht
     }
 }
 
@@ -49,7 +49,7 @@ impl DhtCtrlTask {
                 }
                 ConfigState::Result(Ok(Some(config))) => {
                     if config.dht.enabled {
-                        let id = config.identity.keypair.pubkey_as_dht_id();
+                        let id = config.identity.pubkey.to_dht_id();
                         let port = config.dht.port;
                         if self.dht.borrow().is_none() || self.current_id != id || self.current_port != port {
                             self.current_id = id;

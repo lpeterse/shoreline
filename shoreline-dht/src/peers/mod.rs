@@ -48,9 +48,10 @@ impl Peers {
         self.peers.borrow()
     }
 
-    // pub fn subscribe(&self) -> watch::Receiver<BTreeMap<Id, Arc<Peer>>> {
-    //     self.peers.subscribe()
-    // }
+    pub fn subscribe(&self) -> watch::Receiver<BTreeMap<Id, Arc<Peer>>> {
+        self.peers.subscribe()
+    }
+
     pub fn ctok(&self) -> &CancellationToken {
         &self.ctok
     }

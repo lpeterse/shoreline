@@ -10,7 +10,6 @@ use super::timings::{Timings, MsgTimings};
 use super::addr::SocketAddrPair;
 
 pub struct Path {
-    addr: SocketAddrPair,
     stats: watch::Receiver<PathStats>,
     token: CancellationToken,
 }
@@ -20,11 +19,7 @@ impl Path {
         let (stats_tx, stats_rx) = watch::channel(PathStats::new());
         let task = PathTask::new(addr, stats_tx);
         let _ = tokio::spawn(task.run(token.clone()));
-        Path { addr, stats: stats_rx, token }
-    }
-
-    pub fn addr(&self) -> SocketAddrPair {
-        self.addr
+        Path { stats: stats_rx, token }
     }
 
     pub fn stats(&self) -> &watch::Receiver<PathStats> {
@@ -58,20 +53,13 @@ impl PathTask {
     pub async fn run(mut self, token: CancellationToken) {
         let mut interval_stats = interval(Duration::from_secs(1));
         let mut interval_ping = interval(Duration::from_secs(1));
-        log::info!("Starting path task for {} <-> {}", self.addr.local, self.addr.remote);
         loop {
             select! {
                 _ = token.cancelled() => break,
                 _ = interval_stats.tick() => {
-                    //log::info!("Path {} <-> {}: RTT = {:?}, Jitter = {:?}, Socket Error = {:?}", self.addr.local, self.addr.remote, self.timings.perceived_rtt, self.timings.perceived_jitter, self.socket.as_ref().err());
-                    self.stats.send_modify(|stats| {
-                        stats.rtt = self.timings.perceived_rtt;
-                        stats.jitter = self.timings.perceived_jitter;
-                        stats.error = self.socket.as_ref().err().map(|e| e.to_string());
-                    });
+                    self.update_stats();
                 }
                 _ = interval_ping.tick() => {
-                    log::info!("Resetting path {} <-> {} after 30s", self.addr.local, self.addr.remote);
                     self.send_ping().await
                 }
                 _ = self.receive() => {},
@@ -105,6 +93,14 @@ impl PathTask {
                 self.timings.reset();
             }
         }
+    }
+
+    fn update_stats(&mut self) {
+        self.stats.send_modify(|stats| {
+            stats.rtt = self.timings.measured_rtt;
+            stats.jitter = self.timings.measured_jitter;
+            stats.error = self.socket.as_ref().err().map(|e| e.to_string());
+        });
     }
 }
 

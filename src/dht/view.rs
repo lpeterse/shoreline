@@ -24,7 +24,7 @@ impl DhtView {
     }
 
     pub fn show_top(&mut self, ui: &mut egui::Ui, dht: &DhtCtrl) {
-        if let Some(dht) = dht.dht() {
+        if let Some(dht) = dht.dht().borrow().clone() {
             ui.add_space(3.0);
             ui.horizontal(|ui| {
                 let count = dht.peers().values().count();
@@ -50,7 +50,7 @@ impl DhtView {
     }
 
     pub fn show_central(&mut self, ui: &mut egui::Ui, dht: &DhtCtrl) {
-        if let Some(dht) = dht.dht() {
+        if let Some(dht) = dht.dht().borrow().clone() {
             let peers = {
                 let mut peers = dht.peers().values().cloned().collect::<Vec<_>>();
                 peers.sort_by(|a, b| b.id().similarity(dht.id()).cmp(&a.id().similarity(dht.id())));

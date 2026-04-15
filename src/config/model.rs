@@ -19,8 +19,8 @@ pub struct AppConfig {
 pub struct IdentityConfig {
     #[serde(rename = "name")]
     pub name: String,
-    #[serde(rename = "keypair")]
-    pub keypair: KeyPair,
+    #[serde(rename = "pubkey")]
+    pub pubkey: PublicKey,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,7 +53,7 @@ pub struct DhtConfig {
 
 impl Default for IdentityConfig {
     fn default() -> Self {
-        Self { name: "Unknown Identity".to_string(), keypair: KeyPair::new() }
+        Self { name: "Unknown Identity".to_string(), pubkey: PublicKey::random() }
     }
 }
 

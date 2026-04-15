@@ -112,7 +112,7 @@ impl ConfigView {
                 ui.end_row();
 
                 ui.label("User Key");
-                let pubkey = RichText::new(config.identity.keypair.pubkey_as_pem())
+                let pubkey = RichText::new(config.identity.pubkey.to_string())
                     .monospace()
                     .color(Color32::LIGHT_GREEN);
                 ui.add(Label::new(pubkey).wrap());

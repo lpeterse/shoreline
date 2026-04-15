@@ -90,7 +90,7 @@ impl AppState {
         let dht_ctrl = DhtCtrl::new(rt, config_ctrl.clone());
 
         let peers_view = PeersView::new();
-        let peers_ctrl = PeersCtrl::new(rt, config_ctrl.clone());
+        let peers_ctrl = PeersCtrl::new(rt, config_ctrl.clone(), dht_ctrl.clone());
 
         Self { config_view, config_ctrl, dht_view, dht_ctrl, peers_view, peers_ctrl, active_tab: Self::TAB_DEFAULT }
     }
@@ -106,7 +106,7 @@ impl App for AppState {
             ui.columns(2, |cols| {
                 cols[0].with_layout(Layout::left_to_right(Align::TOP), |ui| {
                     ui.selectable_value(&mut self.active_tab, Self::TAB_PEERS, Self::TAB_PEERS_DISPLAY);
-                    if self.dht_ctrl.dht().is_some() {
+                    if self.dht_ctrl.dht().borrow().is_some() {
                         ui.selectable_value(&mut self.active_tab, Self::TAB_DHT, Self::TAB_DHT_DISPLAY);
                     }
                 });

@@ -6,8 +6,8 @@ pub struct Timings {
     pub remote_time: Duration,
     pub remote_clock: Instant,
     pub last_delta: Duration,
-    pub perceived_rtt: Duration,
-    pub perceived_jitter: Duration,
+    pub measured_rtt: Duration,
+    pub measured_jitter: Duration,
     pub reported_rtt: Duration,
     pub reported_jitter: Duration,
 }
@@ -21,8 +21,8 @@ impl Timings {
             remote_time: Duration::ZERO,
             remote_clock: Instant::now(),
             last_delta: Duration::from_nanos(0),
-            perceived_rtt: Duration::from_nanos(0),
-            perceived_jitter: Duration::from_nanos(0),
+            measured_rtt: Duration::from_nanos(0),
+            measured_jitter: Duration::from_nanos(0),
             reported_rtt: Duration::from_nanos(0),
             reported_jitter: Duration::from_nanos(0),
         }
@@ -30,8 +30,8 @@ impl Timings {
 
     pub fn reset(&mut self) {
         self.last_delta = Duration::from_nanos(0);
-        self.perceived_rtt = Duration::from_nanos(0);
-        self.perceived_jitter = Duration::from_nanos(0);
+        self.measured_rtt = Duration::from_nanos(0);
+        self.measured_jitter = Duration::from_nanos(0);
         self.reported_rtt = Duration::from_nanos(0);
         self.reported_jitter = Duration::from_nanos(0);
     }
@@ -46,8 +46,8 @@ impl Timings {
                 let elapsed = self.remote_clock.elapsed().as_nanos() as u64;
                 time + elapsed
             },
-            perceived_rtt: self.perceived_rtt.as_nanos() as u64,
-            perceived_jitter: self.perceived_jitter.as_nanos() as u64,
+            measured_rtt: self.measured_rtt.as_nanos() as u64,
+            measured_jitter: self.measured_jitter.as_nanos() as u64,
         }
     }
 
@@ -63,30 +63,31 @@ impl Timings {
         if !self.last_delta.is_zero() {
             // Calculate the observed jitter
             let jitter = self.last_delta.abs_diff(delta);
-            if self.perceived_jitter.is_zero() {
+            if self.measured_jitter.is_zero() {
                 // Set the perceived jitter to the observed jitter if it's the first measurement
-                self.perceived_jitter = jitter;
+                self.measured_jitter = jitter;
             } else {
                 // Otherwise use an IIR filter to smooth it
-                self.perceived_jitter = self.perceived_jitter.mul_f64(R) + jitter.mul_f64(1.0 - R);
+                self.measured_jitter = self.measured_jitter.mul_f64(R) + jitter.mul_f64(1.0 - R);
             }
         }
 
         if msg.receiver_time != 0 {
             // Calculate the observed RTT
             let rtt = now.abs_diff(Duration::from_nanos(msg.receiver_time));
-            if self.perceived_rtt.is_zero() {
-                // Set the perceived RTT to the observed RTT if it's the first measurement
-                self.perceived_rtt = rtt;
+            if self.measured_rtt.is_zero() {
+                // Set the measured RTT to the observed RTT if it's the first measurement
+                self.measured_rtt = rtt;
             } else {
                 // Otherwise use an IIR filter to smooth it
-                self.perceived_rtt = self.perceived_rtt.mul_f64(R) + rtt.mul_f64(1.0 - R);
+                self.measured_rtt = self.measured_rtt.mul_f64(R) + rtt.mul_f64(1.0 - R);
             }
         }
 
         self.last_delta = delta;
-        self.reported_rtt = Duration::from_nanos(msg.perceived_rtt);
-        self.reported_jitter = Duration::from_nanos(msg.perceived_jitter);
+        self.reported_rtt = Duration::from_nanos(msg.measured_rtt);
+        self.reported_jitter = Duration::from_nanos(msg.measured_jitter);
+        dbg!(&self);
     }
 }
 
@@ -101,8 +102,8 @@ pub struct MsgTimings {
     /// It is calcaluted as the sender timestamp of the last received message plus the time passed since then.
     /// The difference between this timestamp and the actual time of the receiver's clock on reception is the observed RTT.
     pub receiver_time: u64,
-    pub perceived_rtt: u64,
-    pub perceived_jitter: u64,
+    pub measured_rtt: u64,
+    pub measured_jitter: u64,
 }
 
 impl MsgTimings {
@@ -110,8 +111,8 @@ impl MsgTimings {
         buf[0] = 0x01;
         buf[1 + 0 * 8..][..8].copy_from_slice(&self.sender_time.to_be_bytes());
         buf[1 + 1 * 8..][..8].copy_from_slice(&self.receiver_time.to_be_bytes());
-        buf[1 + 2 * 8..][..8].copy_from_slice(&self.perceived_rtt.to_be_bytes());
-        buf[1 + 3 * 8..][..8].copy_from_slice(&self.perceived_jitter.to_be_bytes());
+        buf[1 + 2 * 8..][..8].copy_from_slice(&self.measured_rtt.to_be_bytes());
+        buf[1 + 3 * 8..][..8].copy_from_slice(&self.measured_jitter.to_be_bytes());
         Some(1 + 4 * 8)
     }
 
@@ -120,8 +121,8 @@ impl MsgTimings {
         Some(Self {
             sender_time: u64::from_be_bytes(buf.get(1 + 0 * 8..1 + 1 * 8)?.try_into().ok()?),
             receiver_time: u64::from_be_bytes(buf.get(1 + 1 * 8..1 + 2 * 8)?.try_into().ok()?),
-            perceived_rtt: u64::from_be_bytes(buf.get(1 + 2 * 8..1 + 3 * 8)?.try_into().ok()?),
-            perceived_jitter: u64::from_be_bytes(buf.get(1 + 3 * 8..1 + 4 * 8)?.try_into().ok()?),
+            measured_rtt: u64::from_be_bytes(buf.get(1 + 2 * 8..1 + 3 * 8)?.try_into().ok()?),
+            measured_jitter: u64::from_be_bytes(buf.get(1 + 3 * 8..1 + 4 * 8)?.try_into().ok()?),
         })
     }
 }
