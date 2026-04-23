@@ -5,7 +5,8 @@ pub struct Timings {
     pub local_clock: Instant,
     pub remote_time: Duration,
     pub remote_clock: Instant,
-    pub last_delta: Duration,
+    pub latest_rx: Option<Instant>,
+    pub latest_delta: Duration,
     pub measured_rtt: Duration,
     pub measured_jitter: Duration,
     pub reported_rtt: Duration,
@@ -20,7 +21,8 @@ impl Timings {
             local_clock: Instant::now(),
             remote_time: Duration::ZERO,
             remote_clock: Instant::now(),
-            last_delta: Duration::from_nanos(0),
+            latest_rx: None,
+            latest_delta: Duration::from_nanos(0),
             measured_rtt: Duration::from_nanos(0),
             measured_jitter: Duration::from_nanos(0),
             reported_rtt: Duration::from_nanos(0),
@@ -29,7 +31,8 @@ impl Timings {
     }
 
     pub fn reset(&mut self) {
-        self.last_delta = Duration::from_nanos(0);
+        self.latest_rx = None;
+        self.latest_delta = Duration::from_nanos(0);
         self.measured_rtt = Duration::from_nanos(0);
         self.measured_jitter = Duration::from_nanos(0);
         self.reported_rtt = Duration::from_nanos(0);
@@ -55,14 +58,15 @@ impl Timings {
         const R: f64 = Timings::IIR_RATIO;
 
         self.remote_clock = Instant::now();
+        self.latest_rx = Some(self.remote_clock);
         self.remote_time = Duration::from_nanos(msg.sender_time);
 
         let now = self.local_clock.elapsed();
         let delta = now.abs_diff(Duration::from_nanos(msg.sender_time));
 
-        if !self.last_delta.is_zero() {
+        if !self.latest_delta.is_zero() {
             // Calculate the observed jitter
-            let jitter = self.last_delta.abs_diff(delta);
+            let jitter = self.latest_delta.abs_diff(delta);
             if self.measured_jitter.is_zero() {
                 // Set the perceived jitter to the observed jitter if it's the first measurement
                 self.measured_jitter = jitter;
@@ -84,7 +88,7 @@ impl Timings {
             }
         }
 
-        self.last_delta = delta;
+        self.latest_delta = delta;
         self.reported_rtt = Duration::from_nanos(msg.measured_rtt);
         self.reported_jitter = Duration::from_nanos(msg.measured_jitter);
         dbg!(&self);

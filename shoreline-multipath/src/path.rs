@@ -1,13 +1,13 @@
+use super::addr::SocketAddrPair;
+use super::stats::PathStats;
+use super::timings::{MsgTimings, Timings};
 use std::net::SocketAddrV6;
 use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
-use tokio::time::{sleep, interval};
-use tokio::time::{Duration};
+use tokio::time::Duration;
+use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
-use super::stats::{PathStats};
-use super::timings::{Timings, MsgTimings};
-use super::addr::SocketAddrPair;
 
 pub struct Path {
     stats: watch::Receiver<PathStats>,
@@ -99,6 +99,7 @@ impl PathTask {
         self.stats.send_modify(|stats| {
             stats.rtt = self.timings.measured_rtt;
             stats.jitter = self.timings.measured_jitter;
+            stats.latest_rx = self.timings.latest_rx;
             stats.error = self.socket.as_ref().err().map(|e| e.to_string());
         });
     }

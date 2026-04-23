@@ -1,15 +1,15 @@
 [package]
-name = "shoreline-dht"
+name = "shoreline-multipath"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 bencode-minimal = { version = "0.1" }
-log = { version = "0.4.29" }
-rand = { version = "0.10.1" }
-tokio = { version = "1.52", features = ["full"] }
+log = { version = "0.4" }
+rand = { version = "0.9" }
+tokio = { version = "1.48", features = ["full"] }
 tokio-util = { version = "0.7" }
-socket2 = { version = "0.6.3" }
+socket2 = { version = "0.6" }
 serde = { version = "1.0" }
 pnet_datalink = { version = "0.35" }
 ipnetwork = { version = "0.20" }

@@ -1,6 +1,14 @@
+pub mod netwatch;
+
 use std::{net::SocketAddrV6, sync::Arc};
 use tokio::{net::UdpSocket, sync::SetOnce};
-use tokio::time::{Duration, Instant, Sleep, sleep_until};
+use tokio::time::{Duration, Instant, Interval, Sleep, sleep_until};
+
+pub fn interval_skip(duration: Duration) -> Interval {
+    let mut intvl = tokio::time::interval(duration);
+    intvl.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    intvl
+}
 
 #[derive(Debug)]
 pub struct Promise<T>(Arc<SetOnce<T>>);

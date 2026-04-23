@@ -1,16 +1,18 @@
+mod addr;
 mod path;
 mod stats;
 mod timings;
-mod addr;
+mod constants;
 
+use self::addr::SocketAddrPair;
 use self::path::Path;
-use self::stats::{MultiPathStats, PathStats};
+use self::stats::MultiPathStats;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use tokio::select;
 use tokio::sync::watch;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use self::addr::SocketAddrPair;
 
 #[derive(Debug, Clone)]
 pub struct MultiPath {
@@ -32,6 +34,10 @@ impl MultiPath {
 
     pub fn stats(&self) -> &watch::Receiver<MultiPathStats> {
         &self.stats
+    }
+
+    pub fn latest_rx(&self) -> Option<Instant> {
+        self.stats.borrow().paths.values().filter_map(|stats| stats.borrow().latest_rx).max()
     }
 }
 

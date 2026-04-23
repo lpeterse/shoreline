@@ -1,5 +1,4 @@
 use crate::Id;
-use crate::Info;
 use crate::Node;
 use crate::Nodes;
 use crate::Peers;
@@ -9,7 +8,6 @@ use tokio::select;
 use std::net::SocketAddrV6;
 use std::ops::Deref;
 use std::{collections::BTreeMap, sync::Arc};
-use socket2::Socket;
 use tokio::sync::{watch, mpsc};
 use tokio_util::sync::CancellationToken;
 use tokio_util::sync::DropGuard;

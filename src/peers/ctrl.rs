@@ -1,9 +1,11 @@
 use crate::{
-    config::{ConfigCtrl, ConfigState, PeerConfig}, dht::DhtCtrl, model::{HostAddress, PublicKey}, multipath::MultiPath
+    config::{ConfigCtrl, ConfigState, PeerConfig}, dht::DhtCtrl, model::{HostAddress, PublicKey}
 };
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use shoreline_dht::{DHT, Netwatch};
-use std::{net::SocketAddrV6, sync::Arc};
-use tokio::{runtime::Runtime, select, sync::watch, task::JoinHandle};
+use shoreline_multipath::MultiPath;
+use std::{net::SocketAddrV6, sync::Arc, time::Duration};
+use tokio::{runtime::Runtime, select, sync::watch, task::JoinHandle, time::interval};
 
 #[derive(Debug, Clone)]
 pub struct PeersCtrl {
@@ -83,46 +85,77 @@ impl Peer {
         dht: watch::Receiver<Option<Arc<DHT>>>,
     ) -> Self {
         let (ra_tx, ra_rx) = watch::channel(vec![]);
-        let task = PeerTask::new(config.pubkey.clone(), dht, ra_tx, config.addresses.clone());
+        let mp = Arc::new(MultiPath::new(la_rx, ra_rx));
+        let task = PeerTask::new(config.pubkey.clone(), mp.clone(), dht, ra_tx, config.addresses.clone());
         let task = tokio::spawn(task.run());
-        let mp = MultiPath::new(la_rx, ra_rx);
-        Self { config, paths: Arc::new(mp), task: Arc::new(task) }
+        Self { config, paths: mp, task: Arc::new(task) }
     }
 }
 
 pub struct PeerTask {
     pubkey: PublicKey,
+    multipath: Arc<MultiPath>,
     dht_rx: watch::Receiver<Option<Arc<DHT>>>,
     ra_tx: watch::Sender<Vec<SocketAddrV6>>,
     ra_static: Vec<HostAddress>,
+
+    mdns: ServiceDaemon,
 }
 
 impl PeerTask {
-    pub fn new(pubkey: PublicKey, dht_rx: watch::Receiver<Option<Arc<DHT>>>, ra_tx: watch::Sender<Vec<SocketAddrV6>>, ra_static: Vec<HostAddress>) -> Self {
-        Self { pubkey, dht_rx, ra_tx, ra_static }
+    pub fn new(pubkey: PublicKey, multipath: Arc<MultiPath>, dht_rx: watch::Receiver<Option<Arc<DHT>>>, ra_tx: watch::Sender<Vec<SocketAddrV6>>, ra_static: Vec<HostAddress>) -> Self {
+        Self { pubkey, multipath, dht_rx, ra_tx, ra_static, mdns: ServiceDaemon::new().expect("Failed to create mDNS service daemon") }
     }
 
     pub async fn run(self) {
+        let id = self.pubkey.to_dht_id();
+        let service_type = "_shoreline._udp.local.";
+        let name = format!("{}", id);
+        let hostname = format!("{}.local.", id);
+        let port = 6882;
+        let properties = [("property_1", "test"), ("property_2", "test")];
+        let info = ServiceInfo::new(service_type, &name, &hostname, (), port, &properties[..]).expect("Failed to create mDNS service info");
+        let mut info = info.enable_addr_auto();
+        info.set_link_local_only(true);
+        self.mdns.register(info).expect("Failed to register mDNS service");
+
+        // Browse for a service type.
+        let receiver = self.mdns.browse(service_type).expect("Failed to browse");
+
+        // Receive the browse events in sync or async. Here is
+        // an example of using a thread. Users can call `receiver.recv_async().await`
+        // if running in async environment.
+        std::thread::spawn(move || {
+            while let Ok(event) = receiver.recv() {
+                match event {
+                    ServiceEvent::ServiceResolved(resolved) => {
+                        println!("Resolved a new service: {:?}", resolved.addresses);
+                    }
+                    other_event => {
+                        println!("Received other event: {:?}", &other_event);
+                    }
+                }
+            }
+        });
+
+        std::future::pending::<()>().await;
+    }
+
+    async fn update_addrs(&self) {
+        let dht = self.dht_rx.borrow().clone();
         let resolved = self.resolve_static().await;
         let _ = self.ra_tx.send(resolved);
-        let dht = self.dht_rx.borrow().clone();
 
-        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
-
-        if let Some(dht) = dht {
+        if let Some(dht) = &dht {
             let mut addrs_rx = dht.search_addrs(&self.pubkey.to_dht_id());
             while let Some(mut addr) = addrs_rx.recv().await {
-                log::info!("PeerTask: found address {} from DHT search", addr);
                 addr.set_port(6882);
                 self.ra_tx.send_modify(|addrs|addrs.push(addr));
             }
         }
-
-        log::info!("PeerTask: DHT search ended, no more addresses will be added");
-        std::future::pending::<()>().await;
     }
 
-    pub async fn resolve_static(&self) -> Vec<SocketAddrV6> {
+    async fn resolve_static(&self) -> Vec<SocketAddrV6> {
         let mut addrs = vec![];
         for addr in &self.ra_static {
             if let Ok(addr) = addr.resolve().await {
