@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde_with::SerializeDisplay, serde_with::DeserializeFromStr)]
 pub struct PublicKey([u8; 32]);
 
 impl PublicKey {

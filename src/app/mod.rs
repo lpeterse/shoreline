@@ -2,6 +2,7 @@ use crate::config::ConfigView;
 use crate::config::ConfigCtrl;
 use crate::dht::DhtView;
 use crate::dht::DhtCtrl;
+use crate::mdns::{MdnsView, MdnsCtrl};
 use crate::peers::{PeersCtrl, PeersView};
 use eframe::App;
 use eframe::egui;
@@ -57,6 +58,9 @@ pub struct AppState {
     pub dht_view: DhtView,
     pub dht_ctrl: DhtCtrl,
 
+    pub mdns_view: MdnsView,
+    pub mdns_ctrl: MdnsCtrl,
+
     pub peers_view: PeersView,
     pub peers_ctrl: PeersCtrl,
 }
@@ -78,6 +82,8 @@ impl AppState {
     pub const TAB_PEERS_DISPLAY: &'static str = "Peers";
     pub const TAB_DHT: &'static str = "dht";
     pub const TAB_DHT_DISPLAY: &'static str = "DHT";
+    pub const TAB_MDNS: &'static str = "mdns";
+    pub const TAB_MDNS_DISPLAY: &'static str = "mDNS";
     pub const TAB_LOG: &'static str = "log";
     pub const TAB_LOG_DISPLAY: &'static str = "Log";
     pub const TAB_DEFAULT: &'static str = Self::TAB_CONFIG;
@@ -86,13 +92,16 @@ impl AppState {
         let config_view = ConfigView::new();
         let config_ctrl = ConfigCtrl::new(rt);
 
+        let mdns_view = MdnsView::new();
+        let mdns_ctrl = MdnsCtrl::new(rt, config_ctrl.clone());
+
         let dht_view = DhtView::new();
         let dht_ctrl = DhtCtrl::new(rt, config_ctrl.clone());
 
         let peers_view = PeersView::new();
         let peers_ctrl = PeersCtrl::new(rt, config_ctrl.clone(), dht_ctrl.clone());
 
-        Self { config_view, config_ctrl, dht_view, dht_ctrl, peers_view, peers_ctrl, active_tab: Self::TAB_DEFAULT }
+        Self { config_view, config_ctrl, dht_view, dht_ctrl, mdns_view, mdns_ctrl, peers_view, peers_ctrl, active_tab: Self::TAB_DEFAULT }
     }
 }
 
@@ -109,6 +118,7 @@ impl App for AppState {
                     if self.dht_ctrl.dht().borrow().is_some() {
                         ui.selectable_value(&mut self.active_tab, Self::TAB_DHT, Self::TAB_DHT_DISPLAY);
                     }
+                    ui.selectable_value(&mut self.active_tab, Self::TAB_MDNS, Self::TAB_MDNS_DISPLAY);
                 });
                 cols[1].with_layout(Layout::right_to_left(Align::TOP), |ui| {
                     ui.selectable_value(&mut self.active_tab, Self::TAB_CONFIG, Self::TAB_CONFIG_DISPLAY);
@@ -148,6 +158,15 @@ impl App for AppState {
                 let frame = Frame::default().inner_margin(Margin::ZERO).fill(ui.style().visuals.window_fill());
                 CentralPanel::default().frame(frame).show_inside(ui, |ui| {
                     self.dht_view.show_central(ui, &self.dht_ctrl);
+                });
+            }
+            Self::TAB_MDNS => {
+                Panel::top("top").show_inside(ui, |ui| {
+                    self.mdns_view.show_top(ui, &self.mdns_ctrl);
+                });
+                let frame = Frame::default().inner_margin(Margin::ZERO).fill(ui.style().visuals.window_fill());
+                CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+                    self.mdns_view.show_central(ui, &self.mdns_ctrl);
                 });
             }
             _ => {

@@ -1,7 +1,6 @@
 use crate::{
     config::{ConfigCtrl, ConfigState, PeerConfig}, dht::DhtCtrl, model::{HostAddress, PublicKey}
 };
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use shoreline_dht::{DHT, Netwatch};
 use shoreline_multipath::MultiPath;
 use std::{net::SocketAddrV6, sync::Arc, time::Duration};
@@ -98,45 +97,15 @@ pub struct PeerTask {
     dht_rx: watch::Receiver<Option<Arc<DHT>>>,
     ra_tx: watch::Sender<Vec<SocketAddrV6>>,
     ra_static: Vec<HostAddress>,
-
-    mdns: ServiceDaemon,
 }
 
 impl PeerTask {
     pub fn new(pubkey: PublicKey, multipath: Arc<MultiPath>, dht_rx: watch::Receiver<Option<Arc<DHT>>>, ra_tx: watch::Sender<Vec<SocketAddrV6>>, ra_static: Vec<HostAddress>) -> Self {
-        Self { pubkey, multipath, dht_rx, ra_tx, ra_static, mdns: ServiceDaemon::new().expect("Failed to create mDNS service daemon") }
+        Self { pubkey, multipath, dht_rx, ra_tx, ra_static }
+
     }
 
     pub async fn run(self) {
-        let id = self.pubkey.to_dht_id();
-        let service_type = "_shoreline._udp.local.";
-        let name = format!("{}", id);
-        let hostname = format!("{}.local.", id);
-        let port = 6882;
-        let properties = [("property_1", "test"), ("property_2", "test")];
-        let info = ServiceInfo::new(service_type, &name, &hostname, (), port, &properties[..]).expect("Failed to create mDNS service info");
-        let mut info = info.enable_addr_auto();
-        info.set_link_local_only(true);
-        self.mdns.register(info).expect("Failed to register mDNS service");
-
-        // Browse for a service type.
-        let receiver = self.mdns.browse(service_type).expect("Failed to browse");
-
-        // Receive the browse events in sync or async. Here is
-        // an example of using a thread. Users can call `receiver.recv_async().await`
-        // if running in async environment.
-        std::thread::spawn(move || {
-            while let Ok(event) = receiver.recv() {
-                match event {
-                    ServiceEvent::ServiceResolved(resolved) => {
-                        println!("Resolved a new service: {:?}", resolved.addresses);
-                    }
-                    other_event => {
-                        println!("Received other event: {:?}", &other_event);
-                    }
-                }
-            }
-        });
 
         std::future::pending::<()>().await;
     }

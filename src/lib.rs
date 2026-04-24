@@ -4,6 +4,7 @@ pub mod mmdb;
 pub mod app;
 pub mod model;
 pub mod dht;
+pub mod mdns;
 pub mod peers;
 pub mod identity;
 
