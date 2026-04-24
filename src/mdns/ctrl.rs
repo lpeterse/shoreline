@@ -3,9 +3,11 @@ use crate::{config::ConfigCtrl, model::PublicKey};
 use mdns_sd::{ScopedIp, ScopedIpV6, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+use std::net::IpAddr;
 use std::time::Duration;
 use std::{collections::BTreeMap, str::FromStr};
 use tokio::{runtime::Runtime, select, sync::watch};
+use crate::util::Netwatch;
 
 #[derive(Debug, Clone)]
 pub struct MdnsCtrl {
@@ -13,9 +15,9 @@ pub struct MdnsCtrl {
 }
 
 impl MdnsCtrl {
-    pub fn new(rt: &Runtime, config: ConfigCtrl) -> Self {
+    pub fn new(rt: &Runtime, config: ConfigCtrl, netwatch: Netwatch) -> Self {
         let (a, b) = watch::channel(BTreeMap::new());
-        rt.spawn(MdnsCtrlTask::new(config, a).run());
+        rt.spawn(MdnsCtrlTask::new(config, netwatch, a).run());
         Self { rx: b }
     }
 
@@ -39,17 +41,19 @@ pub struct MdnsEntry {
 
 struct MdnsCtrlTask {
     config: watch::Receiver<ConfigState>,
+    netwatch: Netwatch,
     tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>,
     id: Option<(PublicKey, String, u16)>,
+    ips: Vec<IpAddr>,
     token: CancellationToken,
     child: CancellationToken
 }
 
 impl MdnsCtrlTask {
-    pub fn new(config: ConfigCtrl, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>) -> Self {
+    pub fn new(config: ConfigCtrl, netwatch: Netwatch, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>) -> Self {
         let token = CancellationToken::new();
         let child = token.child_token();
-        Self { config: config.subscribe(), tx, id: None, token, child }
+        Self { config: config.subscribe(), netwatch, tx, id: None, ips: Vec::new(), token, child }
     }
 
     pub async fn run(mut self) {
@@ -71,6 +75,7 @@ impl MdnsCtrlTask {
                     sleep(Duration::from_secs(10)).await;
                 }
                 _ = self.config.changed() => {}
+                _ = self.netwatch.changed() => {}
             }
         }
     }
@@ -79,9 +84,11 @@ impl MdnsCtrlTask {
         let config = self.config.borrow().clone();
         if let ConfigState::Result(Ok(Some(config))) = config {
             let id = Some((config.identity.pubkey.clone(), config.identity.name.clone(), config.peers.port));
-            if self.id != id {
+            let ips = self.netwatch.ips();
+            if self.id != id || self.ips != ips {
                 self.child.cancel();
                 self.id = id;
+                self.ips = ips;
                 return true;
             } else {
                 return false;
@@ -95,14 +102,14 @@ impl MdnsCtrlTask {
     fn restart(&mut self) {
         if let Some((pubkey, name, port)) = self.id.clone() {
             self.child = self.token.child_token();
-            tokio::spawn(Self::run_mdns(pubkey, name, port, self.tx.clone(), self.child.clone()));
+            tokio::spawn(Self::run_mdns(pubkey, name, port, self.ips.clone(), self.tx.clone(), self.child.clone()));
         }
     }
 
-    async fn run_mdns(pubkey: PublicKey, name: String, port: u16, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>, token: CancellationToken) {
+    async fn run_mdns(pubkey: PublicKey, name: String, port: u16, ips: Vec<IpAddr>, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>, token: CancellationToken) {
         log::info!("Starting mDNS daemon with pubkey {} and port {}", pubkey, port);
         select! {
-            r = Self::run_mdns_error(pubkey, name, port, tx) => {
+            r = Self::run_mdns_error(pubkey, name, port, ips, tx) => {
                 token.cancel();
                 if let Err(e) = r {
                     log::error!("mDNS daemon error: {}", e);
@@ -115,7 +122,7 @@ impl MdnsCtrlTask {
         }
     }
 
-    async fn run_mdns_error(pubkey: PublicKey, displayname: String, port: u16, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn run_mdns_error(pubkey: PublicKey, displayname: String, port: u16, ips: Vec<IpAddr>, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let daemon = ServiceDaemon::new()?;
 
         // Register the service with the daemon
@@ -124,8 +131,7 @@ impl MdnsCtrlTask {
         let host = format!("{}.local.", name);
         let port = port;
         let prop = [("pubkey", pubkey.to_string()), ("displayname", displayname.clone())];
-        let info = ServiceInfo::new(&service, &name, &host, (), port, &prop[..])?;
-        let info = info.enable_addr_auto();
+        let info = ServiceInfo::new(&service, &name, &host, &ips[..], port, &prop[..])?;
         daemon.register(info)?;
 
         // Browse for the service on the local network

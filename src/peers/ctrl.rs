@@ -21,8 +21,7 @@ pub struct PeersCtrl {
 }
 
 impl PeersCtrl {
-    pub fn new(rt: &Runtime, config: ConfigCtrl, dht: DhtCtrl, mdns: MdnsCtrl) -> Self {
-        let netwatch = Netwatch::new(rt);
+    pub fn new(rt: &Runtime, config: ConfigCtrl, netwatch: Netwatch, dht: DhtCtrl, mdns: MdnsCtrl) -> Self {
         let cfg = config.subscribe();
         let dht = dht.dht().clone();
         let mdns = mdns.entries_().clone();

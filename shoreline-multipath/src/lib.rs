@@ -1,5 +1,6 @@
 mod addr;
 mod path;
+mod msg;
 mod stats;
 mod timings;
 mod constants;

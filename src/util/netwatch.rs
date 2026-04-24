@@ -1,6 +1,6 @@
 use crate::util::interval_skip;
 use ipnetwork::Ipv6Network;
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -102,6 +102,17 @@ impl Netwatch {
 
     pub fn list(&self) -> Vec<NetworkInterface> {
         self.list.borrow().clone()
+    }
+
+    pub fn ips(&self) -> Vec<IpAddr> {
+        let mut ips = vec![];
+        for interface in self.list.borrow().iter() {
+            for addr in &interface.addrs {
+                ips.push(IpAddr::V6(*addr));
+            }
+        }
+        ips.sort();
+        ips
     }
 
     /// Check if the address is a global unicast address

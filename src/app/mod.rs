@@ -10,6 +10,7 @@ use egui::*;
 use shoreline_dht::interval_skip;
 use std::time::Duration;
 use tokio::{runtime::Runtime, task::JoinHandle};
+use crate::util::Netwatch;
 
 pub struct MainApp {
     #[allow(dead_code)]
@@ -92,14 +93,16 @@ impl AppState {
         let config_view = ConfigView::new();
         let config_ctrl = ConfigCtrl::new(rt);
 
+        let netwatch = Netwatch::new(rt);
+
         let mdns_view = MdnsView::new();
-        let mdns_ctrl = MdnsCtrl::new(rt, config_ctrl.clone());
+        let mdns_ctrl = MdnsCtrl::new(rt, config_ctrl.clone(), netwatch.clone());
 
         let dht_view = DhtView::new();
         let dht_ctrl = DhtCtrl::new(rt, config_ctrl.clone());
 
         let peers_view = PeersView::new();
-        let peers_ctrl = PeersCtrl::new(rt, config_ctrl.clone(), dht_ctrl.clone(), mdns_ctrl.clone());
+        let peers_ctrl = PeersCtrl::new(rt, config_ctrl.clone(), netwatch.clone(), dht_ctrl.clone(), mdns_ctrl.clone());
 
         Self { config_view, config_ctrl, dht_view, dht_ctrl, mdns_view, mdns_ctrl, peers_view, peers_ctrl, active_tab: Self::TAB_DEFAULT }
     }

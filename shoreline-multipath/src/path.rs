@@ -1,7 +1,7 @@
 use super::addr::SocketAddrPair;
 use super::stats::PathStats;
 use super::timings::{MsgTimings, Timings};
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{SocketAddrV6};
 use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -86,12 +86,6 @@ impl PathTask {
                     self.timings.reset();
                 }
             }
-            // if let Ok(rcvd) = socket.recv(&mut self.rbuf).await {
-            //     let buf = &self.rbuf[..rcvd];
-            //     if let Some(msg) = MsgTimings::decode(buf) {
-            //         self.timings.update(&msg);
-            //     }
-            // }
         } else {
             std::future::pending().await
         }
