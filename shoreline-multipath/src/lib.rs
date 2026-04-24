@@ -96,49 +96,15 @@ impl MultiPathTask {
             // add new paths for new local and remote addresses
             for local in &locals {
                 for remote in &remotes {
-                    let addr = SocketAddrPair { local: *local, remote: *remote };
-                    if Self::is_valid_pair(&addr) && !self.paths.contains_key(&addr) {
-                        let path = Path::new(addr, self.token.child_token());
-                        stats.paths.insert(addr, path.stats().clone());
-                        self.paths.insert(addr, path);
+                    let pair = SocketAddrPair { local: *local, remote: *remote };
+                    println!("{:?}", pair);
+                    if pair.is_valid() && !self.paths.contains_key(&pair) {
+                        let path = Path::new(pair, self.token.child_token());
+                        stats.paths.insert(pair, path.stats().clone());
+                        self.paths.insert(pair, path);
                     }
                 }
             }
         });
-    }
-
-    fn is_valid_pair(pair: &SocketAddrPair) -> bool {
-        if pair.local.scope_id() != pair.remote.scope_id() {
-            return false;
-        }
-        if Self::is_gua(pair.local.ip()) != Self::is_gua(pair.remote.ip()) {
-            return false;
-        }
-        if Self::is_ula(pair.local.ip()) != Self::is_ula(pair.remote.ip()) {
-            return false;
-        }
-        if Self::is_lla(pair.local.ip()) != Self::is_lla(pair.remote.ip()) {
-            return false;
-        }
-        true
-    }
-
-    /// Check if the address is a global unicast address
-    fn is_gua(ip: &std::net::Ipv6Addr) -> bool {
-        !(ip.is_loopback()
-            || ip.is_unspecified()
-            || ip.is_multicast()
-            || ip.is_unique_local()
-            || ip.is_unicast_link_local())
-    }
-
-    /// Check if the address is a unique local address
-    fn is_ula(ip: &std::net::Ipv6Addr) -> bool {
-        ip.is_unique_local()
-    }
-
-    /// Check if the address is a link local address
-    fn is_lla(ip: &std::net::Ipv6Addr) -> bool {
-        ip.is_unicast_link_local()
     }
 }

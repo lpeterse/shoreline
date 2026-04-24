@@ -125,8 +125,7 @@ impl MdnsCtrlTask {
         let port = port;
         let prop = [("pubkey", pubkey.to_string()), ("displayname", displayname.clone())];
         let info = ServiceInfo::new(&service, &name, &host, (), port, &prop[..])?;
-        let mut info = info.enable_addr_auto();
-        info.set_link_local_only(true);
+        let info = info.enable_addr_auto();
         daemon.register(info)?;
 
         // Browse for the service on the local network

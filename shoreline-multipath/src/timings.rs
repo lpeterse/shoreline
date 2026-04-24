@@ -91,7 +91,6 @@ impl Timings {
         self.latest_delta = delta;
         self.reported_rtt = Duration::from_nanos(msg.measured_rtt);
         self.reported_jitter = Duration::from_nanos(msg.measured_jitter);
-        dbg!(&self);
     }
 }
 
