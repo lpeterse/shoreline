@@ -38,16 +38,20 @@ pub struct PathTask {
     timings: Timings,
     rbuf: Vec<u8>,
     upstream: mpsc::UnboundedSender<Vec<u8>>,
-    socket: Result<UdpSocket, std::io::Error>,
+    socket: Option<UdpSocket>,
+    error: Option<String>,
     stats: watch::Sender<PathStats>,
 }
 
 impl PathTask {
     pub fn new(addr: SocketAddrPair, stats: watch::Sender<PathStats>) -> Self {
-        let socket = socket_connected(&addr.local, &addr.remote);
+        let (socket, error) = match socket_connected(&addr.local, &addr.remote) {
+            Ok(socket) => (Some(socket), None),
+            Err(e) => (None, Some(e.to_string())),
+        };
         let rbuf = vec![0u8; 1500];
         let (upstream, _) = mpsc::unbounded_channel();
-        PathTask { addr, timings: Timings::new(), rbuf, upstream, socket, stats }
+        PathTask { addr, timings: Timings::new(), rbuf, upstream, socket, stats, error }
     }
 
     pub async fn run(mut self, token: CancellationToken) {
@@ -68,16 +72,17 @@ impl PathTask {
     }
 
     async fn receive(&mut self) {
-        if let Ok(socket) = &self.socket {
+        if let Some(socket) = &self.socket {
             match socket.recv(&mut self.rbuf).await {
                 Ok(rcvd) => {
                     let buf = &self.rbuf[..rcvd];
                     if let Some(msg) = MsgTimings::decode(buf) {
+                        self.error = None;
                         self.timings.update(&msg);
                     }
                 }
                 Err(e) => {
-                    self.socket = Err(e);
+                    self.error = Some(e.to_string());
                     self.timings.reset();
                 }
             }
@@ -93,19 +98,12 @@ impl PathTask {
     }
 
     async fn send_ping(&mut self) {
-        if self.socket.is_err() {
-            if self.addr.remote.ip().is_unicast_link_local() {
-                self.socket = socket_connected_ull(&self.addr.local, &self.addr.remote);
-            } else {
-                self.socket = socket_connected(&self.addr.local, &self.addr.remote);
-            }
-        }
-        if let Ok(socket) = &self.socket {
+        if let Some(socket) = &self.socket {
             let mut buf = [0u8; 1 + 4 * 8];
             let msg = self.timings.msg();
             let _ = msg.encode(&mut buf);
             if let Err(e) = socket.send(&buf).await {
-                self.socket = Err(e);
+                self.error = Some(e.to_string());
                 self.timings.reset();
             }
         }
@@ -116,7 +114,7 @@ impl PathTask {
             stats.rtt = self.timings.measured_rtt;
             stats.jitter = self.timings.measured_jitter;
             stats.latest_rx = self.timings.latest_rx;
-            stats.error = self.socket.as_ref().err().map(|e| e.to_string());
+            stats.error = self.error.clone();
         });
     }
 }
@@ -129,25 +127,6 @@ fn socket_connected(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpSocke
     socket.set_reuse_port(true)?;
     socket.bind(&(*bind).into())?;
     socket.connect(&(*conn).into())?;
-    socket.set_nonblocking(true)?;
-    Ok(UdpSocket::from_std(socket.into())?)
-}
-
-fn socket_connected_ull(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpSocket, std::io::Error> {
-    let mut bind = *bind;
-    let mut conn = *conn;
-
-    bind.set_ip(Ipv6Addr::UNSPECIFIED);
-    bind.set_scope_id(conn.scope_id());
-    //conn.set_scope_id(0);
-
-    use socket2::{Domain, Protocol, Socket, Type};
-    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
-    socket.set_only_v6(true)?;
-    socket.set_reuse_address(true)?;
-    socket.set_reuse_port(true)?;
-    socket.bind(&SocketAddr::V6(bind).into())?;
-    socket.connect(&SocketAddr::V6(conn).into())?;
     socket.set_nonblocking(true)?;
     Ok(UdpSocket::from_std(socket.into())?)
 }
