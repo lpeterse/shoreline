@@ -1,6 +1,7 @@
 use crate::config::{ConfigCtrl, ConfigState, PeerConfig};
 use crate::dht::DhtCtrl;
 use crate::model::{HostAddress, PublicKey};
+use crate::util::NetworkInterface;
 use shoreline_dht::{DHT};
 use crate::util::Netwatch;
 use shoreline_multipath::MultiPath;
@@ -16,21 +17,27 @@ use tokio::task::JoinHandle;
 #[derive(Debug, Clone)]
 pub struct PeersCtrl {
     peers: watch::Receiver<Vec<Peer>>,
+    netwatch: Netwatch,
 }
 
 impl PeersCtrl {
     pub fn new(rt: &Runtime, config: ConfigCtrl, dht: DhtCtrl, mdns: MdnsCtrl) -> Self {
+        let netwatch = Netwatch::new(rt);
         let cfg = config.subscribe();
         let dht = dht.dht().clone();
         let mdns = mdns.entries_().clone();
         let (peers_tx, peers_rx) = watch::channel(vec![]);
         let task = Box::new(PeersCtrlTask::new(cfg, dht, mdns, peers_tx));
-        let _ = rt.spawn(task.run());
-        Self { peers: peers_rx }
+        let _ = rt.spawn(task.run(netwatch.clone()));
+        Self { peers: peers_rx, netwatch }
     }
 
     pub fn peers(&self) -> Vec<Peer> {
         self.peers.borrow().clone()
+    }
+
+    pub fn interfaces(&self) -> Vec<NetworkInterface> {
+        self.netwatch.list()
     }
 }
 
@@ -51,8 +58,7 @@ impl PeersCtrlTask {
         Self { cfg, dht, mdns, peers }
     }
 
-    pub async fn run(mut self) {
-        let mut nw = Netwatch::new();
+    pub async fn run(mut self, mut nw: Netwatch) {
         let (la_tx, la_rx) = watch::channel(vec![]);
 
         loop {

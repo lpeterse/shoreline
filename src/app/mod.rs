@@ -20,7 +20,7 @@ pub struct MainApp {
 
 impl MainApp {
     pub const NAME: &'static str = "Shoreline";
-    pub const SIZE: [f32; 2] = [800.0, 600.0];
+    pub const SIZE: [f32; 2] = [1024.0, 768.0];
 
     pub fn new(ctx: Context, rt: Runtime) -> Self {
         let task_paint = rt.spawn(Self::run_paint(ctx));
@@ -29,7 +29,7 @@ impl MainApp {
     }
 
     async fn run_paint(ctx: Context) {
-        let mut intvl = interval_skip(Duration::from_millis(100));
+        let mut intvl = interval_skip(Duration::from_millis(1000));
         loop {
             intvl.tick().await;
             ctx.request_repaint();
@@ -86,7 +86,7 @@ impl AppState {
     pub const TAB_MDNS_DISPLAY: &'static str = "mDNS";
     pub const TAB_LOG: &'static str = "log";
     pub const TAB_LOG_DISPLAY: &'static str = "Log";
-    pub const TAB_DEFAULT: &'static str = Self::TAB_CONFIG;
+    pub const TAB_DEFAULT: &'static str = Self::TAB_PEERS;
 
     pub fn new(rt: &Runtime) -> Self {
         let config_view = ConfigView::new();

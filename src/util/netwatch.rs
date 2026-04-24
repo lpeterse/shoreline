@@ -25,9 +25,9 @@ pub struct Netwatch {
 impl Netwatch {
     const INTERVAL: Duration = Duration::from_secs(10);
 
-    pub fn new() -> Self {
+    pub fn new(rt: &tokio::runtime::Runtime) -> Self {
         let (list_, list) = watch::channel(Vec::new());
-        let task = tokio::task::spawn(async move {
+        let task = rt.spawn(async move {
             let mut interval = interval_skip(Self::INTERVAL);
             let list = list_;
             loop {

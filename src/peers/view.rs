@@ -22,6 +22,13 @@ impl PeersView {
 
     pub fn show_central(&self, ui: &mut egui::Ui, ctrl: &PeersCtrl) {
         let peers = ctrl.peers();
+        let interfaces = {
+            let mut map = std::collections::HashMap::new();
+            for interface in ctrl.interfaces() {
+                map.insert(interface.index, interface);
+            }
+            map
+        };
 
         let height = ui.available_height();
         let right = Layout::right_to_left(Align::Center);
@@ -35,11 +42,12 @@ impl PeersView {
             .striped(false)
             .resizable(false)
             .cell_layout(Layout::left_to_right(Align::Center))
-            .column(Column::auto().resizable(true).clip(true))
-            .column(Column::auto().clip(true))
             .column(Column::auto())
-            .column(Column::auto().at_most(80.0))
-            .column(Column::auto().at_most(60.0))
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::auto())
+            .column(Column::auto())
             .column(Column::auto().at_most(60.0))
             .column(Column::auto().at_most(60.0))
             .column(Column::remainder())
@@ -51,11 +59,16 @@ impl PeersView {
                     ui.strong("Peer");
                 });
                 header.col(|ui| {
+                    ui.strong("Interface");
+                });
+                header.col(|ui| {
                     ui.strong("Local");
                 });
+                header.col(|_| {});
                 header.col(|ui| {
                     ui.strong("Remote");
                 });
+                header.col(|_| {});
                 header.col(|ui| {
                     ui.with_layout(right, |ui| {
                         ui.strong("\u{1F501}");
@@ -72,14 +85,42 @@ impl PeersView {
             })
             .body(|mut body| {
                 let bg = Color32::DARK_GRAY.gamma_multiply(0.3);
+                let dimmed = Color32::DARK_GRAY.gamma_multiply(0.5).additive();
+
                 for peer in &peers {
                     let paths = { peer.paths.stats().borrow().paths.clone() };
-                    for (i, (addr, stats)) in paths.iter().enumerate() {
-                        let stats = { stats.borrow().clone() };
-                        let dimmed = Color32::DARK_GRAY.gamma_multiply(0.5).additive();
+                    if paths.is_empty() {
                         body.row(Self::HEIGHT_ROW, |mut row| {
                             row.col(|ui| {
-                                paint_bg(ui, bg);
+                                ui.add_space(10.0);
+                                ui.strong(&peer.config.name);
+                            });
+                            row.col(|ui| {
+                                ui.colored_label(dimmed, "\u{2014}");
+                            });
+                            for _ in 0..2 {
+                                row.col(|ui| {
+                                    ui.colored_label(dimmed, "\u{2014}");
+                                });
+                                row.col(|_| {});
+                            }
+                            for _ in 0..2 {
+                                row.col(|ui| {
+                                    ui.with_layout(right, |ui| {
+                                        ui.colored_label(dimmed, "\u{2014}");
+                                    });
+                                });
+                            }
+                            row.col(|ui| {
+                                ui.label("No known addresses");
+                            });
+                        });
+                    }
+
+                    for (i, (addr, stats)) in paths.iter().enumerate() {
+                        let stats = { stats.borrow().clone() };
+                        body.row(Self::HEIGHT_ROW, |mut row| {
+                            row.col(|ui| {
                                 ui.add_space(10.0);
                                 if i == 0 {
                                     ui.strong(&peer.config.name);
@@ -88,36 +129,50 @@ impl PeersView {
                                 }
                             });
                             row.col(|ui| {
-                                paint_bg(ui, bg);
-                                ui.label(format!("{}", addr.local));
+                                match interfaces.get(&addr.local.scope_id()) {
+                                    Some(interface) => ui.label(&interface.name),
+                                    None => ui.label(addr.local.scope_id().to_string()),
+                                };
                             });
                             row.col(|ui| {
-                                paint_bg(ui, bg);
-                                ui.label(format!("{}", addr.remote));
+                                ui.label(format!("{}", addr.local.ip()));
                             });
                             row.col(|ui| {
-                                paint_bg(ui, bg);
+                                ui.label(format!(":{}", addr.local.port()));
+                            });
+                            row.col(|ui| {
+                                ui.label(format!("{}", addr.remote.ip()));
+                            });
+                            row.col(|ui| {
+                                ui.label(format!(":{}", addr.remote.port()));
+                            });
+                            row.col(|ui| {
                                 ui.with_layout(right, |ui| {
                                     if stats.rtt.as_millis() > 0 {
-                                        ui.label(format!("{:.3} ms", stats.rtt.as_secs_f64() * 1000.0));
+                                        ui.label(format!("{} ms", stats.rtt.as_millis()));
+                                    } else if stats.rtt.as_micros() > 0 {
+                                        ui.label(format!("{} µs", stats.rtt.as_micros()));
                                     } else {
                                         ui.colored_label(dimmed, "\u{2014}");
                                     }
                                 });
                             });
                             row.col(|ui| {
-                                paint_bg(ui, bg);
                                 ui.with_layout(right, |ui| {
                                     if stats.jitter.as_millis() > 0 {
-                                        ui.label(format!("{:.3} ms", stats.jitter.as_secs_f64() * 1000.0));
+                                        ui.label(format!("{} ms", stats.jitter.as_millis()));
+                                    } else if stats.jitter.as_micros() > 0 {
+                                        ui.label(format!("{} µs", stats.jitter.as_micros()));
                                     } else {
                                         ui.colored_label(dimmed, "\u{2014}");
                                     }
                                 });
                             });
                             row.col(|ui| {
-                                paint_bg(ui, bg);
-                                ui.label(stats.error.as_deref().unwrap_or("\u{2014}"));
+                                match stats.error {
+                                    Some(ref e) => ui.label(e),
+                                    None => ui.colored_label(dimmed, "\u{2014}"),
+                                };
                             });
                         });
                     }
