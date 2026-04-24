@@ -22,6 +22,10 @@ impl MdnsCtrl {
     pub fn entries(&self) -> Vec<MdnsEntry> {
         self.rx.borrow().values().cloned().collect()
     }
+
+    pub fn entries_(&self) -> &watch::Receiver<BTreeMap<PublicKey, MdnsEntry>> {
+        &self.rx
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -136,8 +140,8 @@ impl MdnsCtrlTask {
                     let displayname = displayname.and_then(|s| Some(s.val_str().to_string())).unwrap_or_default();
                     if let Some(pubkey) = pubkey {
                         let f = |ip: ScopedIp| if let ScopedIp::V6(ip) = ip { Some(ip) } else { None };
-                        let g = |ip: ScopedIpV6| if ip.addr().to_string() != "fe80::1" { Some(ip) } else { None };
-                        let addrs = resolved.addresses.into_iter().filter_map(f).filter_map(g).collect();
+                        let g = |ip: &ScopedIpV6| ip.addr().to_string() != "fe80::1" &&  !ip.scope_id().name.starts_with("lo");
+                        let addrs = resolved.addresses.into_iter().filter_map(f).filter(g).collect();
                         let service = MdnsEntry { pubkey, displayname, port: resolved.port, addrs, fullname: resolved.fullname.clone() };
                         tx.send_modify(|services| { services.insert(service.pubkey.clone(), service); });
                     }

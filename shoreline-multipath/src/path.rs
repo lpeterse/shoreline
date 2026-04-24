@@ -1,7 +1,7 @@
 use super::addr::SocketAddrPair;
 use super::stats::PathStats;
 use super::timings::{MsgTimings, Timings};
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -82,7 +82,11 @@ impl PathTask {
 
     async fn send_ping(&mut self) {
         if self.socket.is_err() {
-            self.socket = socket_connected(&self.addr.local, &self.addr.remote);
+            if self.addr.remote.ip().is_unicast_link_local() {
+                self.socket = socket_connected_ull(&self.addr.local, &self.addr.remote);
+            } else {
+                self.socket = socket_connected(&self.addr.local, &self.addr.remote);
+            }
         }
         if let Ok(socket) = &self.socket {
             let mut buf = [0u8; 1 + 4 * 8];
@@ -113,6 +117,24 @@ fn socket_connected(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpSocke
     socket.set_reuse_port(true)?;
     socket.bind(&(*bind).into())?;
     socket.connect(&(*conn).into())?;
+    socket.set_nonblocking(true)?;
+    Ok(UdpSocket::from_std(socket.into())?)
+}
+
+fn socket_connected_ull(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpSocket, std::io::Error> {
+    let mut bind = *bind;
+    let mut conn = *conn;
+
+    bind.set_scope_id(conn.scope_id());
+    bind.set_ip(Ipv6Addr::UNSPECIFIED);
+
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_only_v6(true)?;
+    socket.set_reuse_address(true)?;
+    socket.set_reuse_port(true)?;
+    socket.bind(&SocketAddr::V6(bind).into())?;
+    socket.connect(&SocketAddr::V6(conn).into())?;
     socket.set_nonblocking(true)?;
     Ok(UdpSocket::from_std(socket.into())?)
 }
