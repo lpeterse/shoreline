@@ -1,23 +1,32 @@
-use std::collections::BTreeMap;
+use crate::util::interval_skip;
+use ipnetwork::Ipv6Network;
 use std::net::Ipv6Addr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use crate::util::interval_skip;
-use std::ops::Deref;
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NetworkInterface {
+    pub index: u32,
+    pub name: String,
+    pub description: String,
+    pub addrs: Vec<Ipv6Addr>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Netwatch {
     #[allow(dead_code)]
     task: Arc<NetwatchTask>,
-    list: watch::Receiver<BTreeMap<String, Ipv6Addr>>,
+    list: watch::Receiver<Vec<NetworkInterface>>,
 }
 
 impl Netwatch {
     const INTERVAL: Duration = Duration::from_secs(10);
 
     pub fn new() -> Self {
-        let (list_, list) = watch::channel(BTreeMap::new());
+        let (list_, list) = watch::channel(Vec::new());
         let task = tokio::task::spawn(async move {
             let mut interval = interval_skip(Self::INTERVAL);
             let list = list_;
@@ -28,37 +37,55 @@ impl Netwatch {
                         break;
                     }
                 }
-                let mut addresses = BTreeMap::new();
-                for interface in pnet_datalink::interfaces().iter().filter(|i| i.is_up() && !i.is_loopback()) {
-                    // For each interface only consider the first GUA and ULA address.
-                    // These are considered the stable addresses for the interface.
-                    let mut gua: bool = false;
+                let mut new_interfaces = Vec::new();
+                for interface in pnet_datalink::interfaces().into_iter().filter(|i| i.is_up() && !i.is_loopback()) {
+                    let mut new_interface = NetworkInterface {
+                        index: interface.index,
+                        name: interface.name,
+                        description: interface.description,
+                        addrs: vec![],
+                    };
+                    let mut networks = vec![];
+                    // For each interface prefer the first address of a kind:
+                    // These are considered the stable addresses. For GUA, take the first of a network in
+                    // case the interface has mulitple addresses in different GUA networks.
                     let mut ula: bool = false;
-                    for ip in interface.ips.iter() {
+                    let mut lla: bool = false;
+                    for ip in interface.ips.into_iter() {
                         match ip {
                             ipnetwork::IpNetwork::V6(v6) => {
                                 let mut add = false;
                                 let ip = v6.ip();
-                                if !gua && Netwatch::is_gua(&ip) {
-                                    gua = true;
+                                let sn = |n: &Ipv6Network| n.network() == v6.network();
+                                if Netwatch::is_gua(&ip) && !networks.iter().any(sn) {
                                     add = true;
                                 }
-                                if !ula && Netwatch::is_ula(&ip) && v6.prefix() == 64 {
+                                if Netwatch::is_ula(&ip) && v6.prefix() == 64 && !ula {
                                     ula = true;
                                     add = true;
                                 }
+                                if Netwatch::is_lla(&ip) && v6.prefix() == 64 && !lla {
+                                    lla = true;
+                                    add = true;
+                                }
                                 if add {
-                                    addresses.insert(interface.name.clone(), v6.ip());
+                                    networks.push(v6);
                                 }
                             }
                             _ => {}
                         }
                     }
+                    if !networks.is_empty() {
+                        new_interface.addrs = networks.into_iter().map(|n| n.ip()).collect();
+                        new_interface.addrs.sort();
+                        new_interfaces.push(new_interface);
+                    }
                 }
+
                 let b = list.borrow();
-                if b.deref() != &addresses {
+                if b.deref() != &new_interfaces {
                     drop(b);
-                    let _ = list.send(addresses);
+                    let _ = list.send(new_interfaces);
                 }
             }
         });
@@ -69,12 +96,12 @@ impl Netwatch {
         self.list.changed().await.unwrap();
     }
 
-    pub fn list(&self) -> BTreeMap<String, Ipv6Addr> {
+    pub fn list(&self) -> Vec<NetworkInterface> {
         self.list.borrow().clone()
     }
 
     /// Check if the address is a global unicast address
-    fn is_gua(ip: &std::net::Ipv6Addr) -> bool {
+    pub fn is_gua(ip: &std::net::Ipv6Addr) -> bool {
         !(ip.is_loopback()
             || ip.is_unspecified()
             || ip.is_multicast()
@@ -83,8 +110,13 @@ impl Netwatch {
     }
 
     /// Check if the address is a unique local address
-    fn is_ula(ip: &std::net::Ipv6Addr) -> bool {
+    pub fn is_ula(ip: &std::net::Ipv6Addr) -> bool {
         ip.is_unique_local()
+    }
+
+    /// Check if the address is a link local address
+    pub fn is_lla(ip: &std::net::Ipv6Addr) -> bool {
+        ip.is_unicast_link_local()
     }
 }
 

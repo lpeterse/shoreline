@@ -1,4 +1,6 @@
-pub mod netwatch;
+mod netwatch;
+
+pub use netwatch::Netwatch;
 
 use std::{net::SocketAddrV6, sync::Arc};
 use tokio::{net::UdpSocket, sync::SetOnce};

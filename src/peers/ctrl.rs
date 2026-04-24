@@ -1,7 +1,8 @@
 use crate::config::{ConfigCtrl, ConfigState, PeerConfig};
 use crate::dht::DhtCtrl;
 use crate::model::{HostAddress, PublicKey};
-use shoreline_dht::{DHT, Netwatch};
+use shoreline_dht::{DHT};
+use crate::util::Netwatch;
 use shoreline_multipath::MultiPath;
 use std::collections::BTreeMap;
 use std::{net::SocketAddrV6};
@@ -57,8 +58,13 @@ impl PeersCtrlTask {
         loop {
             select! {
                 _ = nw.changed() => {
-                    let addrs_local = nw.list().values().map(|ip| SocketAddrV6::new(*ip, 6882, 0, 0)).collect();
-                    let _ = la_tx.send(addrs_local);
+                    let mut addrs = vec![];
+                    for addr in nw.list().into_iter() {
+                        for ip in &addr.addrs {
+                            addrs.push(SocketAddrV6::new(*ip, 6882, 0, addr.index));
+                        }
+                    }
+                    let _ = la_tx.send(addrs);
                 }
                 _ = self.cfg.changed() => {
                     match { self.cfg.borrow().clone() } {

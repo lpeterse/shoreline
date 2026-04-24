@@ -69,12 +69,24 @@ impl PathTask {
 
     async fn receive(&mut self) {
         if let Ok(socket) = &self.socket {
-            if let Ok(rcvd) = socket.recv(&mut self.rbuf).await {
-                let buf = &self.rbuf[..rcvd];
-                if let Some(msg) = MsgTimings::decode(buf) {
-                    self.timings.update(&msg);
+            match socket.recv(&mut self.rbuf).await {
+                Ok(rcvd) => {
+                    let buf = &self.rbuf[..rcvd];
+                    if let Some(msg) = MsgTimings::decode(buf) {
+                        self.timings.update(&msg);
+                    }
+                }
+                Err(e) => {
+                    self.socket = Err(e);
+                    self.timings.reset();
                 }
             }
+            // if let Ok(rcvd) = socket.recv(&mut self.rbuf).await {
+            //     let buf = &self.rbuf[..rcvd];
+            //     if let Some(msg) = MsgTimings::decode(buf) {
+            //         self.timings.update(&msg);
+            //     }
+            // }
         } else {
             std::future::pending().await
         }
@@ -125,8 +137,9 @@ fn socket_connected_ull(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpS
     let mut bind = *bind;
     let mut conn = *conn;
 
-    bind.set_scope_id(conn.scope_id());
     bind.set_ip(Ipv6Addr::UNSPECIFIED);
+    bind.set_scope_id(conn.scope_id());
+    //conn.set_scope_id(0);
 
     use socket2::{Domain, Protocol, Socket, Type};
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
