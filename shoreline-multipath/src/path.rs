@@ -2,6 +2,7 @@ use super::addr::SocketAddrPair;
 use super::stats::PathStats;
 use super::timings::{MsgTimings, Timings};
 use std::net::{SocketAddrV6};
+use std::os::fd::AsRawFd;
 use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
@@ -116,6 +117,28 @@ impl PathTask {
 fn socket_connected(bind: &SocketAddrV6, conn: &SocketAddrV6) -> Result<UdpSocket, std::io::Error> {
     use socket2::{Domain, Protocol, Socket, Type};
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+
+    // Hole den Raw File Descriptor
+    let fd = socket.as_raw_fd();
+    
+    // Unter macOS ist SO_RECV_ANYIF definiert als 0x1104
+    // Wir nutzen `libc` oder die rohe `setsockopt` Funktion
+    let option: i32 = 1; // 1 = an, 0 = aus
+    let res = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            0x1104, // Wert für SO_RECV_ANYIF auf macOS
+            &option as *const _ as *const libc::c_void,
+            std::mem::size_of::<i32>() as libc::socklen_t,
+        )
+    };
+
+    if res == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+
     socket.set_only_v6(true)?;
     socket.set_reuse_address(true)?;
     socket.set_reuse_port(true)?;
