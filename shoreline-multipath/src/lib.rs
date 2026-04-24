@@ -90,18 +90,30 @@ impl MultiPathTask {
         let remotes = { self.addrs_remote.borrow().clone() };
         // remove paths that are no longer valid
         self.stats.send_modify(|stats| {
-            // TODO
-            self.paths.retain(|addr, _| locals.contains(&addr.local) && remotes.contains(&addr.remote));
-            stats.paths.retain(|addr, _| locals.contains(&addr.local) && remotes.contains(&addr.remote));
-            // add new paths for new local and remote addresses
+            // Remote addresses are considered equal if they have the same IP and port
+            let g = |addr1: &SocketAddrV6, addr2: &SocketAddrV6| {
+                addr1.ip() == addr2.ip() && addr1.port() == addr2.port()
+            };
+            // Retain paths that are a combination of current local and remote addresses
+            let f = |addr: &SocketAddrPair| {
+                let local_valid = locals.contains(&addr.local);
+                let remote_valid = remotes.iter().any(|x| g(x, &addr.remote));
+                local_valid && remote_valid
+            };
+            self.paths.retain(|addr, _| f(addr));
+            stats.paths.retain(|addr, _| f(addr));
+            // Add new paths for new local and remote addresses
             for local in &locals {
                 for remote in &remotes {
-                    let pair = SocketAddrPair { local: *local, remote: *remote };
-                    println!("{:?}", pair);
-                    if pair.is_valid() && !self.paths.contains_key(&pair) {
-                        let path = Path::new(pair, self.token.child_token());
-                        stats.paths.insert(pair, path.stats().clone());
-                        self.paths.insert(pair, path);
+                    // Only pair addresses that are in the same scope (e.g., both link-local or both global)
+                    // The remote scope id is set to match the local scope id
+                    if let Some(pair) = SocketAddrPair::new(*local, *remote) {
+                        if !self.paths.contains_key(&pair) {
+                            println!("{:?}", pair);
+                            let path = Path::new(pair, self.token.child_token());
+                            stats.paths.insert(pair, path.stats().clone());
+                            self.paths.insert(pair, path);
+                        }
                     }
                 }
             }

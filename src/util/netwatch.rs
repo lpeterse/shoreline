@@ -38,7 +38,9 @@ impl Netwatch {
                     }
                 }
                 let mut new_interfaces = Vec::new();
-                for interface in pnet_datalink::interfaces().into_iter().filter(|i| i.is_up() && !i.is_loopback()) {
+                for interface in pnet_datalink::interfaces().into_iter().filter(|i| i.is_running()) {
+                    let is_loopback = interface.is_loopback();
+                    let is_point_to_point = interface.is_point_to_point();
                     let mut new_interface = NetworkInterface {
                         index: interface.index,
                         name: interface.name,
@@ -64,9 +66,11 @@ impl Netwatch {
                                     ula = true;
                                     add = true;
                                 }
-                                if Netwatch::is_lla(&ip) && v6.prefix() == 64 && !lla {
-                                    lla = true;
-                                    add = true;
+                                if Netwatch::is_lla(&ip) && v6.prefix() == 64 && !lla  {
+                                    if !is_loopback && !is_point_to_point {
+                                        lla = true;
+                                        add = true;
+                                    }
                                 }
                                 if add {
                                     networks.push(v6);
