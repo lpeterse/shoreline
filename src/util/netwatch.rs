@@ -38,7 +38,7 @@ impl Netwatch {
                     }
                 }
                 let mut new_interfaces = Vec::new();
-                for interface in pnet_datalink::interfaces().into_iter().filter(|i| i.is_running()) {
+                for interface in pnet_datalink::interfaces().into_iter().filter(Self::is_valid_interface) {
                     let is_loopback = interface.is_loopback();
                     let is_point_to_point = interface.is_point_to_point();
                     let mut new_interface = NetworkInterface {
@@ -132,6 +132,24 @@ impl Netwatch {
     /// Check if the address is a link local address
     pub fn is_lla(ip: &std::net::Ipv6Addr) -> bool {
         ip.is_unicast_link_local()
+    }
+
+    fn is_valid_interface(interface: &pnet_datalink::NetworkInterface) -> bool {
+        if cfg!(target_os = "macos") {
+            if interface.name.starts_with("awdl") {
+                return false;
+            }
+            if interface.name.starts_with("llw") {
+                return false;
+            }
+            if interface.name.starts_with("gif") {
+                return false;
+            }
+            if interface.name.starts_with("bridge") {
+                return false;
+            }
+        }
+        true
     }
 }
 
