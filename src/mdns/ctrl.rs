@@ -124,6 +124,7 @@ impl MdnsCtrlTask {
 
     async fn run_mdns_error(pubkey: PublicKey, displayname: String, port: u16, ips: Vec<IpAddr>, tx: watch::Sender<BTreeMap<PublicKey, MdnsEntry>>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let daemon = ServiceDaemon::new()?;
+        daemon.include_apple_p2p(true)?;
 
         // Register the service with the daemon
         let service = format!("_{}._udp.local.", env!("CARGO_PKG_NAME"));

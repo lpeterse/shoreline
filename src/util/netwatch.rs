@@ -136,9 +136,12 @@ impl Netwatch {
 
     fn is_valid_interface(interface: &pnet_datalink::NetworkInterface) -> bool {
         if cfg!(target_os = "macos") {
-            if interface.name.starts_with("awdl") {
+            if interface.name.starts_with("anpi") {
                 return false;
             }
+            // if interface.name.starts_with("awdl") {
+            //     return false;
+            // }
             if interface.name.starts_with("llw") {
                 return false;
             }
