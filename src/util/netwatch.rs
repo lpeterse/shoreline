@@ -139,12 +139,9 @@ impl Netwatch {
             if interface.name.starts_with("anpi") {
                 return false;
             }
-            // if interface.name.starts_with("awdl") {
-            //     return false;
-            // }
-            // if interface.name.starts_with("llw") {
-            //     return false;
-            // }
+            if interface.name.starts_with("llw") {
+                return false;
+            }
             if interface.name.starts_with("gif") {
                 return false;
             }

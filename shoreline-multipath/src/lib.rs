@@ -101,8 +101,8 @@ impl MultiPathTask {
                 let remote_valid = remotes.iter().any(|x| g(x, &addr.remote));
                 local_valid && remote_valid
             };
-            self.paths.retain(|addr, _| f(addr));
-            stats.paths.retain(|addr, _| f(addr));
+            // self.paths.retain(|addr, _| f(addr));
+            // stats.paths.retain(|addr, _| f(addr));
             // Add new paths for new local and remote addresses
             for local in &locals {
                 for remote in &remotes {
