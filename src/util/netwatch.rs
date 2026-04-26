@@ -11,7 +11,6 @@ use tokio::sync::watch;
 pub struct NetworkInterface {
     pub index: u32,
     pub name: String,
-    pub description: String,
     pub addrs: Vec<Ipv6Addr>,
 }
 
@@ -44,7 +43,6 @@ impl Netwatch {
                     let mut new_interface = NetworkInterface {
                         index: interface.index,
                         name: interface.name,
-                        description: interface.description,
                         addrs: vec![],
                     };
                     let mut networks = vec![];

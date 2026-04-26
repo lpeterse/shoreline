@@ -117,7 +117,7 @@ impl PeersView {
                         });
                     }
 
-                    for (i, (addr, stats)) in paths.iter().enumerate() {
+                    for (i, (path, stats)) in paths.iter().enumerate() {
                         let stats = { stats.borrow().clone() };
                         body.row(Self::HEIGHT_ROW, |mut row| {
                             row.col(|ui| {
@@ -129,22 +129,22 @@ impl PeersView {
                                 }
                             });
                             row.col(|ui| {
-                                match interfaces.get(&addr.local.scope_id()) {
+                                match interfaces.get(&path.iface()) {
                                     Some(interface) => ui.label(&interface.name),
-                                    None => ui.label(addr.local.scope_id().to_string()),
+                                    None => ui.label(path.iface().to_string()),
                                 };
                             });
                             row.col(|ui| {
-                                ui.label(format!("{}", addr.local.ip()));
+                                ui.label(format!("{}", path.local().ip()));
                             });
                             row.col(|ui| {
-                                ui.label(format!(":{}", addr.local.port()));
+                                ui.label(format!(":{}", path.local().port()));
                             });
                             row.col(|ui| {
-                                ui.label(format!("{}", addr.remote.ip()));
+                                ui.label(format!("{}", path.remote().ip()));
                             });
                             row.col(|ui| {
-                                ui.label(format!(":{}", addr.remote.port()));
+                                ui.label(format!(":{}", path.remote().port()));
                             });
                             row.col(|ui| {
                                 ui.with_layout(right, |ui| {
